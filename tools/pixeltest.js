@@ -66,6 +66,98 @@ async function analyze(dataUrl) {
 
 let failures = 0;
 
+/*
+ * 定位状态灯并测量它到气泡描边的净空。
+ * 状态灯是唯一使用状态色的元素，按颜色即可从渲染结果里反解出它的圆心，
+ * 再用椭圆参数方程采样求最近边界距离——这样「灯有没有压到边框上」
+ * 就成了可断言的事实，而不是靠肉眼判断。
+ */
+async function measureDot(dataUrl, status, geom) {
+	const COLORS = { ok: [34, 197, 94], error: [224, 67, 63], loading: [245, 158, 11] };
+	const rgb = COLORS[status];
+	if (!rgb || !geom) return null;
+
+	const img = await h.loadImage(dataUrlToBuffer(dataUrl));
+	const W = img.width, H = img.height;
+	const c = h.createCanvas(W, H);
+	const ctx = c.getContext('2d');
+	ctx.drawImage(img, 0, 0);
+	const d = ctx.getImageData(0, 0, W, H).data;
+
+	/* 收集状态色像素 */
+	const mask = new Uint8Array(W * H);
+	for (let i = 0; i < d.length; i += 4) {
+		if (d[i + 3] < 128) continue;
+		if (Math.abs(d[i] - rgb[0]) <= 30 &&
+			Math.abs(d[i + 1] - rgb[1]) <= 30 &&
+			Math.abs(d[i + 2] - rgb[2]) <= 30) {
+			mask[i / 4] = 1;
+		}
+	}
+
+	/*
+	 * 连通域聚类后挑「最像实心圆」的一块。
+	 * 不能直接对全部同色像素求质心：谷时文案「梁文谷」用的绿色与状态灯同色系，
+	 * 其抗锯齿边缘会被一并算进去，把质心拉偏（实测会差出 10px 以上）。
+	 * 实心圆的 填充率×方正度 接近 0.785，细笔画文字远低于此，据此可区分。
+	 */
+	const seen = new Uint8Array(W * H);
+	let best = null;
+	for (let s = 0; s < mask.length; s++) {
+		if (!mask[s] || seen[s]) continue;
+		const stack = [s];
+		seen[s] = 1;
+		let n = 0, sx = 0, sy = 0, minX = W, maxX = -1, minY = H, maxY = -1;
+		while (stack.length) {
+			const p = stack.pop();
+			const px = p % W, py = (p / W) | 0;
+			n++; sx += px; sy += py;
+			if (px < minX) minX = px;
+			if (px > maxX) maxX = px;
+			if (py < minY) minY = py;
+			if (py > maxY) maxY = py;
+			for (let oy = -1; oy <= 1; oy++) {
+				for (let ox = -1; ox <= 1; ox++) {
+					const nx = px + ox, ny = py + oy;
+					if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+					const q = ny * W + nx;
+					if (mask[q] && !seen[q]) { seen[q] = 1; stack.push(q); }
+				}
+			}
+		}
+		const bw = maxX - minX + 1, bh = maxY - minY + 1;
+		const fill = n / (bw * bh);
+		const squareness = Math.min(bw, bh) / Math.max(bw, bh);
+		const score = fill * squareness;
+		if (n >= 3 && (!best || score > best.score)) {
+			best = { score, n, x: sx / n, y: sy / n, bw, bh, fill };
+		}
+	}
+	if (!best) return null;
+
+	const px = best.x, py = best.y;
+
+	/* 采样求圆心到椭圆边界的最近距离 */
+	let nearest = Infinity;
+	for (let i = 0; i < 1440; i++) {
+		const t = i * Math.PI / 720;
+		const ex = geom.cx + geom.rx * Math.cos(t);
+		const ey = geom.cy + geom.ry * Math.sin(t);
+		const dd = Math.hypot(ex - px, ey - py);
+		if (dd < nearest) nearest = dd;
+	}
+
+	const dotR = Math.max(3, Math.round(Math.min(W, H) * 0.022));
+	return {
+		x: px, y: py,
+		blobW: best.bw, blobH: best.bh, blobPx: best.n, fill: best.fill,
+		dist: nearest,
+		dotR: dotR,
+		gap: nearest - dotR,       /* 灯外缘到描边的净空，负数即压线 */
+		dy: py - geom.cy           /* 相对椭圆中心的垂直偏移，负数=偏上 */
+	};
+}
+
 async function shot(file, label, w, hh, status, balance, turn, over) {
 	const ctx = 'c';
 	T.instances[ctx] = {
@@ -114,6 +206,16 @@ async function shot(file, label, w, hh, status, balance, turn, over) {
 		if (merged && separate) warn.push('明细行重复绘制');
 	}
 
+	/* 状态灯不得压到气泡描边上 */
+	const dot = await measureDot(h.captured, status, geom);
+	let dotTxt = 'n/a';
+	if (!dot) {
+		warn.push('没能定位到状态灯');
+	} else {
+		dotTxt = '净空' + dot.gap.toFixed(1) + 'px';
+		if (dot.gap < 2) warn.push('状态灯压到气泡边框（净空 ' + dot.gap.toFixed(1) + 'px）');
+	}
+
 	if (warn.length) failures++;
 	console.log(
 		file.padEnd(30) +
@@ -121,6 +223,7 @@ async function shot(file, label, w, hh, status, balance, turn, over) {
 		'椭圆=' + (geom ? Math.round(geom.rx * 2) + 'x' + Math.round(geom.ry * 2) : 'n/a').padEnd(10) +
 		'比例=' + (geom ? (geom.rx / geom.ry).toFixed(2) : 'n/a').padEnd(6) +
 		layout.padEnd(10) +
+		dotTxt.padEnd(13) +
 		(warn.length ? '✗ ' + warn.join(' / ') : '✓')
 	);
 }

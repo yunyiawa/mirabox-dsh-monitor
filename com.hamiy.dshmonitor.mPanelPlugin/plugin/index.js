@@ -398,13 +398,26 @@ function render(context) {
 		ctx.fill();
 	}
 
-	/* ---------- 状态灯：贴在椭圆右上边缘，带白色底与同色描边 ---------- */
+	/* ---------- 状态灯：气泡右上内侧，白底 + 同色描边环 ---------- */
 	const dotR = Math.max(3, Math.round(Math.min(w, h) * 0.022));
 	const statusColor = st.status === "ok" ? "#22c55e"
 		: st.status === "error" ? C_PEAK : "#f59e0b";
-	const dotA = -Math.PI / 4;
-	const dotX = cx + rx * Math.cos(dotA) * 0.94;
-	const dotY = cyB + ry * Math.sin(dotA) * 0.94;
+
+	/*
+	 * 位置按椭圆参数方程取（(rx·cosθ, ry·sinθ)），再沿该方向向内收，
+	 * 直到圆点与气泡描边之间留出 margin 的净空。
+	 *
+	 * 早先固定在 -45°、0.94 半径处：椭圆一旦压扁，该点就贴到边框上了。
+	 * 现在角度与内收量都由尺寸算出，任何长宽比下都留有余量。
+	 */
+	const dotAngle = -0.50;                          /* 比 -45° 更低，落在右上方而非正上角 */
+	const bx = rx * Math.cos(dotAngle);
+	const by = ry * Math.sin(dotAngle);
+	const edgeDist = Math.sqrt(bx * bx + by * by);   /* 圆心沿该方向到边界的距离 */
+	const dotMargin = dotR + strokeW + Math.max(3, Math.min(rx, ry) * 0.06);
+	const dotK = Math.max(0.30, 1 - dotMargin / edgeDist);
+	const dotX = cx + bx * dotK;
+	const dotY = cyB + by * dotK;
 
 	ctx.beginPath();
 	ctx.arc(dotX, dotY, dotR, 0, Math.PI * 2);

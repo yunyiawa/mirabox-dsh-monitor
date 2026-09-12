@@ -201,6 +201,11 @@ This is a personal project. It is **not affiliated with, sponsored by, or endors
 
 ## Changelog
 
+### 2.4.1
+- **Fixed: the status dot was overlapping the bubble outline.** Its position was pinned at -45° / 0.94 of the radius, which left negative clearance once the ellipse was flattened (measured +0.5px at 480×240 and −0.2px at 240×120, i.e. actual overlap)
+- The dot is now placed via the ellipse's parametric equation and pulled inward along that direction, keeping roughly 3–5.5px of clearance at any size or aspect ratio
+- New self-check: locate the dot in the rendered output, measure its real clearance to the outline, and assert it never touches
+
 ### 2.4.0
 - Doubled the default widget size: 320×160 → 480×240
 

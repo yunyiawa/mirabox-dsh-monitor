@@ -40,7 +40,7 @@
   "Description": "DSH / DeepSeek realtime monitor widget for MiraBox Craft",
   "Category": "DSH",
   "CategoryIcon": "static/icon.png",
-  "Version": "2.4.0",
+  "Version": "2.4.1",
   "URL": "",
   "OS": [
     {
