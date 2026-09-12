@@ -1,0 +1,54 @@
+{
+  "Actions": [
+    {
+      "UUID": "com.hamiy.dshmonitor.action1",
+      "PropertyInspectorPath": "propertyInspector/index.html",
+      "Icon": "static/icon.png",
+      "state": 0,
+      "States": [
+        {
+          "FontSize": "10",
+          "TitleAlignment": "bottom",
+          "Image": "static/icon.png"
+        }
+      ],
+      "Settings": {
+        "ActionGeometry": {
+          "width": "480",
+          "height": "240"
+        },
+        "refreshSec": 30,
+        "periodMode": "liangwen",
+        "showToday": true,
+        "showTurn": true,
+        "fontFamily": "Microsoft YaHei"
+      },
+      "UserTitleEnabled": false,
+      "SupportedInMultiActions": false,
+      "Controllers": [
+        "SecondaryScreen"
+      ],
+      "Name": "DSH Monitor",
+      "Tooltip": "鲸鱼娘气泡：DeepSeek 余额 / 今日消耗 / 本轮花费"
+    }
+  ],
+  "SDKVersion": 1,
+  "Author": "HamiyaYui",
+  "Name": "DSH Monitor",
+  "Icon": "static/icon.png",
+  "CodePath": "plugin/index.html",
+  "Description": "DSH / DeepSeek realtime monitor widget for MiraBox Craft",
+  "Category": "DSH",
+  "CategoryIcon": "static/icon.png",
+  "Version": "2.4.0",
+  "URL": "",
+  "OS": [
+    {
+      "Platform": "windows",
+      "MinimumVersion": "7"
+    }
+  ],
+  "Software": {
+    "MinimumVersion": "2.9"
+  }
+}

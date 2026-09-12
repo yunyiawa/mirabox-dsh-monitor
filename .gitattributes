@@ -1,0 +1,9 @@
+# 统一按 LF 入库，避免 Windows 开发者与 CI 之间产生无意义的行尾 diff
+* text=auto eol=lf
+
+# 二进制资源不做行尾转换
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.mp3 binary

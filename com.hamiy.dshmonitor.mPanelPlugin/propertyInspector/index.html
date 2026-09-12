@@ -1,0 +1,143 @@
+<!DOCTYPE HTML>
+<html>
+
+<head>
+	<title>DSH Monitor 设置</title>
+	<meta charset="utf-8" />
+	<style>
+		body {
+			margin: 0;
+			padding: 12px;
+			background: #2d2d2d;
+			color: #e2e8f0;
+			font-family: "Microsoft YaHei", sans-serif;
+			font-size: 13px;
+		}
+
+		.row {
+			display: flex;
+			align-items: center;
+			margin-bottom: 10px;
+		}
+
+		.row>label {
+			width: 92px;
+			color: #94a3b8;
+			flex: none;
+		}
+
+		.row select,
+		.row input[type=number] {
+			flex: 1;
+			min-width: 0;
+			background: #1e1e1e;
+			border: 1px solid #3f3f3f;
+			color: #e2e8f0;
+			padding: 5px 7px;
+			border-radius: 4px;
+		}
+
+		.row input[type=checkbox] {
+			width: 16px;
+			height: 16px;
+		}
+
+		.hint {
+			color: #64748b;
+			font-size: 12px;
+			line-height: 1.6;
+			margin-top: 14px;
+			border-top: 1px solid #3f3f3f;
+			padding-top: 10px;
+		}
+
+		code {
+			color: #7dd3fc;
+		}
+	</style>
+</head>
+
+<body>
+	<div class="row">
+		<label>峰谷文案</label>
+		<select id="periodMode">
+			<option value="liangwen">梁文峰 / 梁文谷</option>
+			<option value="plain">高峰时段 / 空闲时段</option>
+			<option value="qiangqiang">!?峰峰?! / !?谷谷?!</option>
+		</select>
+	</div>
+	<div class="row">
+		<label>刷新间隔</label>
+		<input id="refreshSec" type="number" min="5" max="600" />
+	</div>
+	<div class="row">
+		<label>今日消耗</label>
+		<input id="showToday" type="checkbox" />
+	</div>
+	<div class="row">
+		<label>本轮花费</label>
+		<input id="showTurn" type="checkbox" />
+	</div>
+
+	<div class="hint">
+		数据取自本机 DSH 的 <code>/dsh-whale/</code> 接口，端口自动探测（3080 / 3081 …）。<br />
+		需要 <b>DSH Web 正在运行</b>且已装 <code>dsh-whale-widget</code>。<br />
+		显示「DSH 未运行」时先启动 DSH；点一下控件可立即刷新。<br />
+		控件拉扁会切成左右排布，拉高会切成上下排布。
+	</div>
+
+	<script>
+		let websocket = null;
+		let pluginUUID = null;
+		/* 保存完整配置，改单项时合并回去，避免把 ActionGeometry 冲掉 */
+		let current = {};
+
+		function connectElgatoStreamDeckSocket(inPort, inPluginUUID, inRegisterEvent, inInfo) {
+			pluginUUID = inPluginUUID;
+			websocket = new WebSocket("ws://127.0.0.1:" + inPort);
+
+			websocket.onopen = function () {
+				websocket.send(JSON.stringify({ uuid: inPluginUUID, event: inRegisterEvent }));
+				websocket.send(JSON.stringify({ event: "getSettings", context: inPluginUUID }));
+			};
+
+			websocket.onmessage = function (e) {
+				const data = JSON.parse(e.data);
+				if (data.event === "didReceiveSettings" && data.payload && data.payload.settings) {
+					current = data.payload.settings;
+					fill(current);
+				}
+			};
+		}
+
+		function fill(s) {
+			document.getElementById("periodMode").value = s.periodMode || "liangwen";
+			document.getElementById("refreshSec").value = s.refreshSec || 30;
+			document.getElementById("showToday").checked = s.showToday !== false;
+			document.getElementById("showTurn").checked = s.showTurn !== false;
+		}
+
+		function push() {
+			if (!websocket) return;
+			const next = Object.assign({}, current, {
+				periodMode: document.getElementById("periodMode").value,
+				refreshSec: parseInt(document.getElementById("refreshSec").value) || 30,
+				showToday: document.getElementById("showToday").checked,
+				showTurn: document.getElementById("showTurn").checked
+			});
+			current = next;
+			websocket.send(JSON.stringify({
+				event: "setSettings",
+				context: pluginUUID,
+				payload: next
+			}));
+		}
+
+		["periodMode", "refreshSec", "showToday", "showTurn"].forEach(function (id) {
+			document.getElementById(id).addEventListener("change", push);
+			document.getElementById(id).addEventListener("input", push);
+		});
+	</script>
+</body>
+
+</html>

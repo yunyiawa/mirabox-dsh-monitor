@@ -1,0 +1,34 @@
+name: tests
+
+# 插件的绘制逻辑是纯浏览器 JS，可以用 Node 离线驱动，
+# 因此不依赖 MiraBox Craft 软件本身即可在 CI 中验证。
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # 控件含中文文本；缺少字体时 canvas 画不出字，像素断言会失败
+      - name: Install CJK fonts
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fonts-noto-cjk
+
+      - name: Install canvas backend
+        run: npm i @napi-rs/canvas
+
+      - name: Smoke test (size x state matrix)
+        run: node tools/smoketest.js
+
+      - name: Render self-check
+        run: node tools/pixeltest.js
