@@ -21,13 +21,15 @@
 		}
 
 		.row>label {
-			width: 92px;
+			width: 88px;
 			color: #94a3b8;
 			flex: none;
 		}
 
 		.row select,
-		.row input[type=number] {
+		.row input[type=number],
+		.row input[type=password],
+		.row input[type=text] {
 			flex: 1;
 			min-width: 0;
 			background: #1e1e1e;
@@ -42,6 +44,47 @@
 			height: 16px;
 		}
 
+		.keywrap {
+			display: flex;
+			flex: 1;
+			gap: 6px;
+			min-width: 0;
+		}
+
+		.keywrap input {
+			flex: 1;
+			min-width: 0;
+		}
+
+		button {
+			background: #203170;
+			color: #dbeafe;
+			border: 1px solid #35509c;
+			border-radius: 4px;
+			padding: 5px 10px;
+			cursor: pointer;
+			font-size: 12px;
+			flex: none;
+		}
+
+		button:hover {
+			background: #2a4189;
+		}
+
+		.status {
+			margin-top: 8px;
+			font-size: 12px;
+			min-height: 16px;
+		}
+
+		.ok {
+			color: #22c55e;
+		}
+
+		.err {
+			color: #ef4444;
+		}
+
 		.hint {
 			color: #64748b;
 			font-size: 12px;
@@ -54,10 +97,27 @@
 		code {
 			color: #7dd3fc;
 		}
+
+		.warn {
+			color: #f59e0b;
+		}
 	</style>
 </head>
 
 <body>
+	<div class="row">
+		<label>API Key</label>
+		<div class="keywrap">
+			<input id="apiKey" type="password" placeholder="sk-..." autocomplete="off" spellcheck="false" />
+			<button id="toggle" type="button" title="显示/隐藏">👁</button>
+		</div>
+	</div>
+	<div class="row">
+		<label></label>
+		<button id="test" type="button">测试连接</button>
+	</div>
+	<div class="status" id="status"></div>
+
 	<div class="row">
 		<label>峰谷文案</label>
 		<select id="periodMode">
@@ -68,28 +128,32 @@
 	</div>
 	<div class="row">
 		<label>刷新间隔</label>
-		<input id="refreshSec" type="number" min="5" max="600" />
+		<input id="refreshSec" type="number" min="10" max="3600" />
 	</div>
 	<div class="row">
-		<label>今日消耗</label>
+		<label>今日已用</label>
 		<input id="showToday" type="checkbox" />
 	</div>
 	<div class="row">
-		<label>本轮花费</label>
-		<input id="showTurn" type="checkbox" />
+		<label>赠送/充值</label>
+		<input id="showDetail" type="checkbox" />
 	</div>
 
 	<div class="hint">
-		数据取自本机 DSH 的 <code>/dsh-whale/</code> 接口，端口自动探测（3080 / 3081 …）。<br />
-		需要 <b>DSH Web 正在运行</b>且已装 <code>dsh-whale-widget</code>。<br />
-		显示「DSH 未运行」时先启动 DSH；点一下控件可立即刷新。<br />
-		控件拉扁会切成左右排布，拉高会切成上下排布。
+		直接调用 DeepSeek 官方余额接口 <code>api.deepseek.com/user/balance</code>，<b>不再需要 DSH</b>。<br />
+		API Key 在 <a href="#" id="getkey" style="color:#7dd3fc">platform.deepseek.com</a> 的「API keys」页面创建。<br />
+		<br />
+		<span class="warn">⚠ 注意</span>：Key 会以<b>明文</b>保存在 MiraBox Craft 的主题配置里，
+		请不要在这台机器以外复用同一个 Key。<br />
+		<br />
+		「今日已用」是本地记账：累加余额的下降量。<b>控件没运行时发生的消耗统计不到。</b><br />
+		更新 Key 后若仍显示旧状态，点一下控件即可立即刷新。
 	</div>
 
 	<script>
 		let websocket = null;
 		let pluginUUID = null;
-		/* 保存完整配置，改单项时合并回去，避免把 ActionGeometry 冲掉 */
+		/* 保存完整配置，改单项时合并回去，避免把 ActionGeometry / 记账数据冲掉 */
 		let current = {};
 
 		function connectElgatoStreamDeckSocket(inPort, inPluginUUID, inRegisterEvent, inInfo) {
@@ -110,20 +174,24 @@
 			};
 		}
 
+		const $ = (id) => document.getElementById(id);
+
 		function fill(s) {
-			document.getElementById("periodMode").value = s.periodMode || "liangwen";
-			document.getElementById("refreshSec").value = s.refreshSec || 30;
-			document.getElementById("showToday").checked = s.showToday !== false;
-			document.getElementById("showTurn").checked = s.showTurn !== false;
+			$("apiKey").value = s.apiKey || "";
+			$("periodMode").value = s.periodMode || "liangwen";
+			$("refreshSec").value = s.refreshSec || 60;
+			$("showToday").checked = s.showToday !== false;
+			$("showDetail").checked = s.showDetail !== false;
 		}
 
 		function push() {
 			if (!websocket) return;
 			const next = Object.assign({}, current, {
-				periodMode: document.getElementById("periodMode").value,
-				refreshSec: parseInt(document.getElementById("refreshSec").value) || 30,
-				showToday: document.getElementById("showToday").checked,
-				showTurn: document.getElementById("showTurn").checked
+				apiKey: $("apiKey").value.trim(),
+				periodMode: $("periodMode").value,
+				refreshSec: parseInt($("refreshSec").value) || 60,
+				showToday: $("showToday").checked,
+				showDetail: $("showDetail").checked
 			});
 			current = next;
 			websocket.send(JSON.stringify({
@@ -133,9 +201,72 @@
 			}));
 		}
 
-		["periodMode", "refreshSec", "showToday", "showTurn"].forEach(function (id) {
-			document.getElementById(id).addEventListener("change", push);
-			document.getElementById(id).addEventListener("input", push);
+		["periodMode", "refreshSec", "showToday", "showDetail"].forEach(function (id) {
+			$(id).addEventListener("change", push);
+			$(id).addEventListener("input", push);
+		});
+
+		/* Key 用防抖，避免每敲一个字符就写一次设置 */
+		let keyTimer = null;
+		$("apiKey").addEventListener("input", function () {
+			if (keyTimer) clearTimeout(keyTimer);
+			keyTimer = setTimeout(function () { push(); setStatus("", ""); }, 600);
+		});
+
+		$("toggle").addEventListener("click", function () {
+			const el = $("apiKey");
+			el.type = el.type === "password" ? "text" : "password";
+		});
+
+		$("getkey").addEventListener("click", function (ev) {
+			ev.preventDefault();
+			if (websocket) {
+				websocket.send(JSON.stringify({
+					event: "openUrl",
+					payload: { url: "https://platform.deepseek.com/api_keys" }
+				}));
+			}
+		});
+
+		function setStatus(text, cls) {
+			const el = $("status");
+			el.textContent = text;
+			el.className = "status " + (cls || "");
+		}
+
+		/* 属性面板自己直接打接口，结果只用于提示，不改插件状态 */
+		$("test").addEventListener("click", function () {
+			const key = $("apiKey").value.trim();
+			if (!key) { setStatus("请先填写 API Key", "err"); return; }
+			setStatus("测试中…", "");
+			const x = new XMLHttpRequest();
+			x.open("GET", "https://api.deepseek.com/user/balance", true);
+			x.timeout = 12000;
+			x.setRequestHeader("Authorization", "Bearer " + key);
+			x.setRequestHeader("Accept", "application/json");
+			x.onreadystatechange = function () {
+				if (x.readyState !== 4) return;
+				if (x.status >= 200 && x.status < 300) {
+					try {
+						const j = JSON.parse(x.responseText);
+						const info = (j.balance_infos || [])[0];
+						if (info) {
+							setStatus("✓ 连接成功：余额 " + info.currency + " " + info.total_balance, "ok");
+						} else {
+							setStatus("✓ 连接成功，但返回里没有余额信息", "ok");
+						}
+					} catch (e) {
+						setStatus("返回不是合法 JSON", "err");
+					}
+				} else if (x.status === 401 || x.status === 403) {
+					setStatus("✗ API Key 无效（HTTP " + x.status + "）", "err");
+				} else {
+					setStatus("✗ 请求失败（HTTP " + x.status + "）", "err");
+				}
+			};
+			x.ontimeout = function () { setStatus("✗ 请求超时", "err"); };
+			x.onerror = function () { setStatus("✗ 网络不可用或被 CORS 拦截", "err"); };
+			x.send();
 		});
 	</script>
 </body>

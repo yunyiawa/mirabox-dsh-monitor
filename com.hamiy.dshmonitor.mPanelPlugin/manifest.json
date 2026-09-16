@@ -17,10 +17,11 @@
           "width": "480",
           "height": "240"
         },
-        "refreshSec": 30,
+        "apiKey": "",
+        "refreshSec": 60,
         "periodMode": "liangwen",
         "showToday": true,
-        "showTurn": true,
+        "showDetail": true,
         "fontFamily": "Microsoft YaHei"
       },
       "UserTitleEnabled": false,
@@ -29,7 +30,7 @@
         "SecondaryScreen"
       ],
       "Name": "DSH Monitor",
-      "Tooltip": "鲸鱼娘气泡：DeepSeek 余额 / 今日消耗 / 本轮花费"
+      "Tooltip": "鲸鱼娘气泡：DeepSeek 余额 / 今日已用 / 赠送充值"
     }
   ],
   "SDKVersion": 1,
@@ -37,10 +38,10 @@
   "Name": "DSH Monitor",
   "Icon": "static/icon.png",
   "CodePath": "plugin/index.html",
-  "Description": "DSH / DeepSeek realtime monitor widget for MiraBox Craft",
+  "Description": "DeepSeek balance monitor widget for MiraBox Craft (calls the official API directly, no DSH required)",
   "Category": "DSH",
   "CategoryIcon": "static/icon.png",
-  "Version": "2.4.1",
+  "Version": "3.0.0",
   "URL": "",
   "OS": [
     {

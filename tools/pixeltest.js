@@ -7,7 +7,7 @@
  *   - 椭圆长宽比是否等于插件里的 BUBBLE_ASPECT
  *   - 椭圆是否超出画布
  *   - 白色气泡 / #203170 描边 / 深色文字 是否真的存在
- *   - 扁平椭圆下明细行是否正确合并（否则字号会不可读）
+ *   - 状态灯与气泡描边之间是否留有净空（早期版本会压线）
  *
  * 同时把每个用例的真实输出写成 PNG，产物即仓库 preview/ 里的预览图。
  *
@@ -28,9 +28,27 @@ const h = loadPlugin();
 const T = h.api;
 const UUID = T.ACTION_UUID;
 
-const BAL = { ok: true, totalBalance: 5.81, currency: 'CNY', isPeak: false, todayUsage: 1.24 };
-const BAL_PEAK = { ok: true, totalBalance: 123.45, currency: 'CNY', isPeak: true, todayUsage: 98.76 };
-const TURN = { ok: true, amount: 0.5253038999999998, tokens: 3290229 };
+/** 造一个正常的余额状态 */
+function okState(over) {
+	return Object.assign({
+		status: 'ok',
+		balance: 11.12, granted: 0, toppedUp: 11.12, currency: 'CNY',
+		isPeak: false, httpCode: '',
+		ledger: { day: '2026-09-16', used: 1.77, last: 11.12 },
+		timer: null
+	}, over || {});
+}
+
+/** 造一个失败状态 */
+function errState(status, code) {
+	return {
+		status: status,
+		balance: null, granted: 0, toppedUp: 0, currency: 'CNY',
+		isPeak: false, httpCode: code || '',
+		ledger: { day: '', used: 0, last: null },
+		timer: null
+	};
+}
 
 /** 统计一张 PNG 的像素特征 */
 async function analyze(dataUrl) {
@@ -73,9 +91,9 @@ let failures = 0;
  * 就成了可断言的事实，而不是靠肉眼判断。
  */
 async function measureDot(dataUrl, status, geom) {
-	const COLORS = { ok: [34, 197, 94], error: [224, 67, 63], loading: [245, 158, 11] };
-	const rgb = COLORS[status];
-	if (!rgb || !geom) return null;
+	const COLORS = { ok: [34, 197, 94], loading: [245, 158, 11] };
+	const rgb = COLORS[status] || [224, 67, 63];      /* 其余失败态都是红灯 */
+	if (!geom) return null;
 
 	const img = await h.loadImage(dataUrlToBuffer(dataUrl));
 	const W = img.width, H = img.height;
@@ -102,6 +120,13 @@ async function measureDot(dataUrl, status, geom) {
 	 * 实心圆的 填充率×方正度 接近 0.785，细笔画文字远低于此，据此可区分。
 	 */
 	const seen = new Uint8Array(W * H);
+	const dotR = Math.max(3, Math.round(Math.min(W, H) * 0.022));
+	/*
+	 * 尺寸上限：灯芯直径约 1.24×dotR，抗锯齿后包围盒再宽一点。
+	 * 失败态的文字用的是同一个红色（C_PEAK），若不限制尺寸，检测器会
+	 * 挑到更"方正"的字形，测出与真实位置无关的净空。
+	 */
+	const maxBlob = Math.max(10, Math.round(dotR * 4));
 	let best = null;
 	for (let s = 0; s < mask.length; s++) {
 		if (!mask[s] || seen[s]) continue;
@@ -126,6 +151,7 @@ async function measureDot(dataUrl, status, geom) {
 			}
 		}
 		const bw = maxX - minX + 1, bh = maxY - minY + 1;
+		if (Math.max(bw, bh) > maxBlob) continue;       /* 太大 → 是文字，不是灯 */
 		const fill = n / (bw * bh);
 		const squareness = Math.min(bw, bh) / Math.max(bw, bh);
 		const score = fill * squareness;
@@ -147,7 +173,6 @@ async function measureDot(dataUrl, status, geom) {
 		if (dd < nearest) nearest = dd;
 	}
 
-	const dotR = Math.max(3, Math.round(Math.min(W, H) * 0.022));
 	return {
 		x: px, y: py,
 		blobW: best.bw, blobH: best.bh, blobPx: best.n, fill: best.fill,
@@ -158,13 +183,12 @@ async function measureDot(dataUrl, status, geom) {
 	};
 }
 
-async function shot(file, label, w, hh, status, balance, turn, over) {
+async function shot(file, label, w, hh, state, over) {
 	const ctx = 'c';
-	T.instances[ctx] = {
+	T.instances[ctx] = Object.assign({
 		settings: Object.assign({}, T.DEFAULT_SETTINGS,
-			{ ActionGeometry: { width: w, height: hh } }, over || {}),
-		status, balance, turn, timer: null
-	};
+			{ ActionGeometry: { width: w, height: hh } }, over || {})
+	}, state);
 
 	h.reset();
 	T.render(ctx);
@@ -185,7 +209,7 @@ async function shot(file, label, w, hh, status, balance, turn, over) {
 	if (stat.opaque < 0.30) warn.push('画面过空');
 	if (stat.nearWhite < 0.05) warn.push('没有白色气泡');
 	if (stat.colored < 0.005) warn.push('没有鲸鱼/彩色内容');
-	if (stat.dark < 0.002 && status === 'ok') warn.push('没有文字');
+	if (stat.dark < 0.002 && state.status === 'ok') warn.push('没有文字');
 	if (stat.outline < 0.002) warn.push('没有 #203170 描边');
 
 	if (!geom) {
@@ -198,16 +222,8 @@ async function shot(file, label, w, hh, status, balance, turn, over) {
 		if (2 * geom.rx > w + 1 || 2 * geom.ry > hh + 1) warn.push('椭圆超出画布');
 	}
 
-	let layout = '';
-	if (status === 'ok') {
-		const merged = texts.some((t) => t.indexOf('·') >= 0 && t.indexOf('今日') >= 0);
-		const separate = texts.some((t) => t.indexOf('今日已用') >= 0);
-		layout = merged ? '明细合并' : (separate ? '明细两行' : '明细缺失');
-		if (merged && separate) warn.push('明细行重复绘制');
-	}
-
 	/* 状态灯不得压到气泡描边上 */
-	const dot = await measureDot(h.captured, status, geom);
+	const dot = await measureDot(h.captured, state.status, geom);
 	let dotTxt = 'n/a';
 	if (!dot) {
 		warn.push('没能定位到状态灯');
@@ -216,19 +232,40 @@ async function shot(file, label, w, hh, status, balance, turn, over) {
 		if (dot.gap < 2) warn.push('状态灯压到气泡边框（净空 ' + dot.gap.toFixed(1) + 'px）');
 	}
 
+	/* 文案断言：该出现的字必须真的画出来了 */
+	const joined = texts.join(' | ');
+	const expect = {
+		ok: ['当前时间段为:', '¥', '今日已用'],
+		nokey: ['未配置 API Key'],
+		auth: ['API Key 无效'],
+		net: ['网络不可用'],
+		timeout: ['网络不可用'],
+		parse: ['返回格式异常'],
+		loading: ['连接中']
+	}[state.status] || [];
+	for (const e of expect) {
+		if (joined.indexOf(e) === -1) warn.push('缺少文案「' + e + '」');
+	}
+
+	/* 赠送/充值行的文案随 granted 是否为 0 而变，两种都算合格 */
+	if (state.status === 'ok' && (!over || over.showDetail !== false)) {
+		if (joined.indexOf('赠送') === -1 && joined.indexOf('充值余额') === -1) {
+			warn.push('缺少赠送/充值行');
+		}
+	}
+
 	if (warn.length) failures++;
 	console.log(
 		file.padEnd(30) +
 		String(w + 'x' + hh).padEnd(10) +
 		'椭圆=' + (geom ? Math.round(geom.rx * 2) + 'x' + Math.round(geom.ry * 2) : 'n/a').padEnd(10) +
-		'比例=' + (geom ? (geom.rx / geom.ry).toFixed(2) : 'n/a').padEnd(6) +
-		layout.padEnd(10) +
 		dotTxt.padEnd(13) +
 		(warn.length ? '✗ ' + warn.join(' / ') : '✓')
 	);
 }
 
 (async function main() {
+	fs.rmSync(OUT_DIR, { recursive: true, force: true });
 	fs.mkdirSync(OUT_DIR, { recursive: true });
 
 	/* 触发 willAppear 让鲸鱼图开始加载 */
@@ -236,15 +273,17 @@ async function shot(file, label, w, hh, status, balance, turn, over) {
 	await h.wait(800);
 
 	console.log('=== 渲染自检 ===');
-	await shot('preview-480x240-valley.png', '默认尺寸 谷时', 480, 240, 'ok', BAL, TURN);
-	await shot('preview-480x240-peak.png', '默认尺寸 峰时', 480, 240, 'ok', BAL_PEAK, TURN);
-	await shot('preview-320x160-valley.png', '320x160 谷时', 320, 160, 'ok', BAL, TURN);
-	await shot('preview-320x160-peak.png', '320x160 峰时', 320, 160, 'ok', BAL_PEAK, TURN);
-	await shot('preview-480x160.png', '480x160', 480, 160, 'ok', BAL, TURN);
-	await shot('preview-240x120.png', '240x120', 240, 120, 'ok', BAL, TURN);
-	await shot('preview-200x200.png', '方形 200x200', 200, 200, 'ok', BAL, TURN);
-	await shot('preview-160x120.png', '小尺寸 160x120', 160, 120, 'ok', BAL, TURN);
-	await shot('preview-offline.png', 'DSH 未运行', 480, 240, 'error', null, null);
+	await shot('preview-480x240-valley.png', '默认尺寸 谷时', 480, 240, okState());
+	await shot('preview-480x240-peak.png', '默认尺寸 峰时', 480, 240, okState({ isPeak: true, balance: 123.45, granted: 20, toppedUp: 103.45 }));
+	await shot('preview-320x160-valley.png', '320x160 谷时', 320, 160, okState());
+	await shot('preview-320x160-peak.png', '320x160 峰时', 320, 160, okState({ isPeak: true }));
+	await shot('preview-480x160.png', '480x160', 480, 160, okState());
+	await shot('preview-240x120.png', '240x120', 240, 120, okState());
+	await shot('preview-200x200.png', '方形 200x200', 200, 200, okState());
+	await shot('preview-160x120.png', '小尺寸 160x120', 160, 120, okState());
+	await shot('preview-nokey.png', '未配置 API Key', 480, 240, errState('nokey'));
+	await shot('preview-auth.png', 'API Key 无效', 480, 240, errState('auth'));
+	await shot('preview-offline.png', '网络不可用', 480, 240, errState('net'));
 
 	console.log('');
 	console.log(failures === 0

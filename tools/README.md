@@ -20,8 +20,8 @@ $env:MIRABOX_DIR="C:\Program Files\MiraBoxCraft"
 ## 用法
 
 ```powershell
-node tools/smoketest.js   # 尺寸×状态矩阵冒烟，断言不抛异常（49 个用例）
-node tools/pixeltest.js   # 真实渲染 + 像素自检，并重新生成 preview/
+node tools/smoketest.js   # 尺寸×状态矩阵冒烟，断言不抛异常（100 个用例，含全部失败态）
+node tools/pixeltest.js   # 真实渲染 + 像素/文案自检，并重新生成 preview/
 ```
 
 两个脚本都是全通过退出码 0，有失败退出码 1，可直接接进 CI。

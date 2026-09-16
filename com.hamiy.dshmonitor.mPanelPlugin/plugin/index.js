@@ -1,22 +1,24 @@
 /*
  * DSH Monitor —— 鲸鱼娘 + 气泡样式
  *
- * 数据来源：本机 DSH Web 服务的 dsh-whale 接口（由 dsh-whale-widget 插件提供）
- *   /dsh-whale/balance.json   -> 余额、今日消耗、峰谷
- *   /dsh-whale/last-turn.json -> 上一轮对话的花费与 token
+ * v3.0.0 起不再依赖 DSH：直接调用 DeepSeek 官方余额接口。
  *
- * 这样不需要在本插件里保存 DeepSeek API Key，峰谷计价直接复用 DSH 侧结果。
- * DSH 端口不固定（实测见过 3080 / 3081），因此按候选列表自动探测并缓存。
+ *   GET https://api.deepseek.com/user/balance
+ *   Authorization: Bearer <你的 API Key>
+ *   -> { is_available, balance_infos: [{ currency, total_balance,
+ *                                        granted_balance, topped_up_balance }] }
  *
- * 视觉：左侧鲸鱼娘本体，右侧白色气泡；峰谷文案默认玩梁文锋的梗。
+ * 官方接口只给「当前余额」，没有用量历史，所以：
+ *   - 今日已用：本地记账（累加余额的下降量），随设置持久化
+ *   - 峰谷状态：按官方时段本地判定（工作日 9-12 / 14-18 为高峰，周末全天谷价）
+ *
+ * API Key 由属性面板填写，存在 MiraBox Craft 的主题配置里。
+ * ⚠️ 那是明文存储，请不要在这台机器以外的地方复用同一个 Key。
  */
 
 const ACTION_UUID = "com.hamiy.dshmonitor.action1";
 
-/* DSH 候选端口，按顺序探测 */
-const DSH_PORTS = [3080, 3081, 3082, 3090];
-const PATH_BALANCE = "/dsh-whale/balance.json";
-const PATH_TURN = "/dsh-whale/last-turn.json";
+const BALANCE_URL = "https://api.deepseek.com/user/balance";
 
 /* 配色，跟原版小鲸鱼保持一致 */
 const C_PEAK = "#e0433f";      /* 峰：红 */
@@ -29,84 +31,140 @@ const C_OUTLINE = "#203170";   /* 气泡描边：与主文字同色 */
 /* 气泡椭圆的目标长宽比（rx/ry）。越大越扁，1.0 就是正圆 */
 const BUBBLE_ASPECT = 2.0;
 
+/* 高峰时段（北京时间，整点区间）。来源与上游一致：
+ * 工作日 9:00–12:00、14:00–18:00；2026-08-23 起周末全天按谷价。 */
+const PEAK_HOURS = [[9, 12], [14, 18]];
+
 /* 每个控件实例的状态，key = context */
 const instances = {};
-
-/* 探测成功后缓存，优先复用 */
-let activePort = null;
 
 /* 鲸鱼本体：预加载一次，全实例共用 */
 let whaleImg = null;
 let whaleReady = false;
 
 const DEFAULT_SETTINGS = {
-	ActionGeometry: { width: 320, height: 160 },
-	refreshSec: 30,
+	ActionGeometry: { width: 480, height: 240 },
+	apiKey: "",
+	refreshSec: 60,
 	periodMode: "liangwen",
 	showToday: true,
-	showTurn: true,
+	showDetail: true,
 	fontFamily: "Microsoft YaHei"
 };
 
+/* ---------------- 时间与峰谷 ---------------- */
+
+/** 取北京时间（UTC+8）的日历信息：0=周日 6=周六 */
+function beijingParts(timeSec) {
+	const bj = new Date(timeSec * 1000 + 8 * 3600 * 1000);
+	return { hour: bj.getUTCHours(), dow: bj.getUTCDay() };
+}
+
+/** 是否处于高峰时段 */
+function isPeakTime(timeSec) {
+	const t = isFinite(Number(timeSec)) ? Number(timeSec) : Math.floor(Date.now() / 1000);
+	const p = beijingParts(t);
+	if (p.dow === 0 || p.dow === 6) return false;            /* 周末全天谷价 */
+	for (let i = 0; i < PEAK_HOURS.length; i++) {
+		if (p.hour >= PEAK_HOURS[i][0] && p.hour < PEAK_HOURS[i][1]) return true;
+	}
+	return false;
+}
+
+/** 北京时间的日期键，用于「今日」归零 */
+function beijingDayKey(timeSec) {
+	const bj = new Date(timeSec * 1000 + 8 * 3600 * 1000);
+	return bj.getUTCFullYear() + "-" + pad2(bj.getUTCMonth() + 1) + "-" + pad2(bj.getUTCDate());
+}
+
 /* ---------------- 数据获取 ---------------- */
 
-function xhrJSON(url, timeoutMs, onOk, onErr) {
+/*
+ * 直连 DeepSeek 官方余额接口。
+ * 注意：带 Authorization 头属于「非简单请求」，若宿主强制 CORS 会先发 OPTIONS 预检。
+ * MiraBox Craft 的插件页可跨域取第三方 API（自带插件即如此），因此这里按可用处理；
+ * 万一不行，错误会以「网络不可用」显式暴露，不会静默失败。
+ */
+function fetchBalance(key, cb) {
+	if (!key) {
+		cb({ kind: "nokey" });
+		return;
+	}
 	try {
 		const x = new XMLHttpRequest();
-		x.open("GET", url, true);
-		x.timeout = timeoutMs;
+		x.open("GET", BALANCE_URL, true);
+		x.timeout = 12000;
+		x.setRequestHeader("Authorization", "Bearer " + key);
+		x.setRequestHeader("Accept", "application/json");
 		x.onreadystatechange = function () {
 			if (x.readyState !== 4) return;
 			if (x.status >= 200 && x.status < 300) {
 				try {
-					onOk(JSON.parse(x.responseText));
+					cb(null, JSON.parse(x.responseText));
 				} catch (e) {
-					onErr("json");
+					cb({ kind: "parse" });
 				}
+			} else if (x.status === 401 || x.status === 403) {
+				cb({ kind: "auth" });
 			} else {
-				onErr("http" + x.status);
+				cb({ kind: "http", code: x.status });
 			}
 		};
-		x.ontimeout = function () { onErr("timeout"); };
-		x.onerror = function () { onErr("net"); };
+		x.ontimeout = function () { cb({ kind: "timeout" }); };
+		x.onerror = function () { cb({ kind: "net" }); };
 		x.send();
 	} catch (e) {
-		onErr("xhr");
+		cb({ kind: "net" });
 	}
 }
 
-function fetchFromAnyPort(path, done) {
-	const order = activePort
-		? [activePort].concat(DSH_PORTS.filter(function (p) { return p !== activePort; }))
-		: DSH_PORTS.slice();
+/** 从接口返回里取出第一条余额信息 */
+function pickBalanceInfo(payload) {
+	const list = payload && payload.balance_infos;
+	if (!list || !list.length) return null;
+	return list[0];
+}
 
-	let i = 0;
-	function next() {
-		if (i >= order.length) {
-			done(new Error("no-dsh"), null);
-			return;
-		}
-		const port = order[i++];
-		xhrJSON("http://127.0.0.1:" + port + path, 4000, function (json) {
-			activePort = port;
-			done(null, json);
-		}, next);
+/* ---------------- 本地记账（今日已用） ---------------- */
+
+function normalizeLedger(raw) {
+	const l = raw && typeof raw === "object" ? raw : {};
+	return {
+		day: typeof l.day === "string" ? l.day : "",
+		used: isFinite(Number(l.used)) ? Number(l.used) : 0,
+		last: isFinite(Number(l.last)) && l.last !== null ? Number(l.last) : null
+	};
+}
+
+/*
+ * 用余额差值累加「今日已用」。
+ * 只累加下降量，所以中途充值不会把已用量冲掉。
+ * 局限：控件没在跑的时候发生的消耗统计不到。
+ */
+function updateLedger(ledger, balance) {
+	const today = beijingDayKey(Math.floor(Date.now() / 1000));
+	if (ledger.day !== today) {
+		return { day: today, used: 0, last: balance, changed: true };
 	}
-	next();
+	if (ledger.last === null) {
+		return { day: today, used: ledger.used, last: balance, changed: true };
+	}
+	const delta = ledger.last - balance;
+	if (delta > 0.000001) {
+		return { day: today, used: ledger.used + delta, last: balance, changed: true };
+	}
+	if (delta < 0) {
+		/* 充值了：只更新基准，不计入已用 */
+		return { day: today, used: ledger.used, last: balance, changed: true };
+	}
+	return { day: today, used: ledger.used, last: balance, changed: false };
 }
 
 /* ---------------- 格式化 ---------------- */
 
 function money(v, digits) {
-	if (v === null || v === undefined || isNaN(v)) return "--";
+	if (v === null || v === undefined || v === "" || isNaN(v)) return "--";
 	return Number(v).toFixed(digits === undefined ? 2 : digits);
-}
-
-function tokens(v) {
-	if (!v && v !== 0) return "--";
-	if (v >= 1e6) return (v / 1e6).toFixed(2) + "M";
-	if (v >= 1e3) return (v / 1e3).toFixed(1) + "K";
-	return String(v);
 }
 
 /* 峰谷文案 */
@@ -116,6 +174,16 @@ function periodText(isPeak, mode) {
 	return isPeak ? "梁文峰" : "梁文谷";   /* liangwen，默认 */
 }
 
+/* 错误状态对应的提示文案 */
+function statusMessage(st) {
+	if (st.status === "nokey") return "未配置 API Key";
+	if (st.status === "auth") return "API Key 无效";
+	if (st.status === "net" || st.status === "timeout") return "网络不可用";
+	if (st.status === "parse") return "返回格式异常";
+	if (st.status === "http") return "查询失败 " + (st.httpCode || "");
+	return "连接中…";
+}
+
 /* ---------------- 鲸鱼本体加载 ---------------- */
 
 function loadWhale() {
@@ -123,12 +191,9 @@ function loadWhale() {
 	whaleImg = new Image();
 	whaleImg.onload = function () {
 		whaleReady = true;
-		/* 图到了，把所有实例重画一遍 */
 		Object.keys(instances).forEach(render);
 	};
-	whaleImg.onerror = function () {
-		whaleReady = false;
-	};
+	whaleImg.onerror = function () { whaleReady = false; };
 	whaleImg.src = "../static/whale.png";
 }
 
@@ -162,8 +227,8 @@ function render(context) {
 	if (!st) return;
 
 	const s = st.settings;
-	const w = parseInt(s.ActionGeometry && s.ActionGeometry.width) || 320;
-	const h = parseInt(s.ActionGeometry && s.ActionGeometry.height) || 160;
+	const w = parseInt(s.ActionGeometry && s.ActionGeometry.width) || 480;
+	const h = parseInt(s.ActionGeometry && s.ActionGeometry.height) || 240;
 	const fam = s.fontFamily || "Microsoft YaHei";
 
 	const canvas = document.createElement("canvas");
@@ -202,11 +267,6 @@ function render(context) {
 	const cx = bubX + bubW / 2;
 	const cyB = bubY + bubH / 2;
 
-	/*
-	 * 目标长宽比。气泡区域往往接近正方形，若直接铺满外接框，
-	 * 椭圆会长成近似正圆（1.14 左右），不够“横向宽”。
-	 * 这里按目标比例取最大内接椭圆：哪个方向先受限，就由它定尺寸，另一边按比例算。
-	 */
 	let rx, ry;
 	if (bubW / bubH >= BUBBLE_ASPECT) {
 		ry = bubH / 2;                    /* 高度受限：吃满高度 */
@@ -228,7 +288,6 @@ function render(context) {
 	ctx.fill();
 	ctx.restore();
 
-	/* 尖角与椭圆合成同一条路径，描边才不会在接缝处留线 */
 	ellipseBubble(ctx, cx, cyB, rx, ry, tail, tailSize);
 	ctx.lineJoin = "round";
 	ctx.lineWidth = strokeW;
@@ -236,28 +295,17 @@ function render(context) {
 	ctx.stroke();
 
 	/* ---------- 气泡内文字 ---------- */
-	const st_data = st.status;
-	const isPeak = !!(st.balance && st.balance.isPeak);
+	const ready = st.status === "ok";
+	const isPeak = ready ? st.isPeak : isPeakTime(Math.floor(Date.now() / 1000));
 	const periodColor = isPeak ? C_PEAK : C_OFF;
 
 	/* 组装要显示的行 */
 	const rows = [];
-	if (st_data === "ok") {
+	if (ready) {
 		rows.push({ k: "period" });
 		rows.push({ k: "balance" });
-		if (s.showToday && s.showTurn) {
-			/*
-			 * 椭圆压扁后垂直空间变少。若强行排四行，字号会被压到看不清，
-			 * 所以行高不足时把两条明细并成一行，优先保住可读性。
-			 */
-			const bandH = ry * 0.66 * 2;
-			if (bandH / 4 < 19) rows.push({ k: "detail" });
-			else { rows.push({ k: "today" }); rows.push({ k: "turn" }); }
-		} else if (s.showToday) {
-			rows.push({ k: "today" });
-		} else if (s.showTurn) {
-			rows.push({ k: "turn" });
-		}
+		if (s.showToday) rows.push({ k: "today" });
+		if (s.showDetail) rows.push({ k: "detail" });
 	} else {
 		rows.push({ k: "state" });
 	}
@@ -267,7 +315,7 @@ function render(context) {
 	 * 关键：椭圆在不同高度上的可用宽度不同（中间最宽、上下收窄），
 	 * 所以逐行按该行高度反算真实宽度，否则四角的字会被椭圆切掉。
 	 */
-	const bandHalf = ry * 0.66;          /* 保持在半高 66% 内，宽度仍然够用 */
+	const bandHalf = ry * 0.66;
 	const innerTop = cyB - bandHalf;
 	const innerH = bandHalf * 2;
 	const rowH = innerH / rows.length;
@@ -278,7 +326,6 @@ function render(context) {
 		return half * 2 * 0.84;          /* 留出描边与呼吸空间 */
 	}
 
-	/* 字号同时受行高与该行可用宽度约束 */
 	const fitFont = function (text, maxPx, availW, weight) {
 		let px = Math.max(6, Math.round(maxPx));
 		do {
@@ -300,7 +347,6 @@ function render(context) {
 		const row = rows[i];
 
 		if (row.k === "period") {
-			/* 「当前时间段为: 梁文峰」——灰色标签 + 彩色值 */
 			const label = "当前时间段为:";
 			const value = periodText(isPeak, s.periodMode);
 			let px = Math.round(rowH * 0.52);
@@ -308,10 +354,9 @@ function render(context) {
 			ctx.font = "bold " + px + "px " + fam;
 			const lw = ctx.measureText(label).width;
 			const sp = Math.round(px * 0.35);
-			ctx.font = "bold " + px + "px " + fam;
 			const vw = ctx.measureText(value).width;
 			const total = lw + sp + vw;
-			let x = innerX + Math.max(0, (innerW - total) / 2);
+			const x = innerX + Math.max(0, (innerW - total) / 2);
 
 			ctx.fillStyle = C_SUB;
 			ctx.fillText(label, x, cy);
@@ -319,17 +364,16 @@ function render(context) {
 			ctx.fillText(value, x + lw + sp, cy);
 
 		} else if (row.k === "balance") {
-			/* 余额：主视觉 */
-			const text = money(st.balance.totalBalance, 2);
+			const text = money(st.balance, 2);
 			const unit = "¥";
-			let px = fitFont(text, Math.round(rowH * 1.15), innerW);
+			const px = fitFont(text, Math.round(rowH * 1.15), innerW);
 			ctx.font = "bold " + px + "px " + fam;
 			const tw = ctx.measureText(text).width;
-			let upx = Math.round(px * 0.42);
+			const upx = Math.round(px * 0.42);
 			ctx.font = "bold " + upx + "px " + fam;
 			const uw = ctx.measureText(unit).width;
 			const sp = Math.round(px * 0.12);
-			let x = innerX + Math.max(0, (innerW - (uw + sp + tw)) / 2);
+			const x = innerX + Math.max(0, (innerW - (uw + sp + tw)) / 2);
 
 			ctx.fillStyle = C_INK;
 			ctx.font = "bold " + upx + "px " + fam;
@@ -337,13 +381,8 @@ function render(context) {
 			ctx.font = "bold " + px + "px " + fam;
 			ctx.fillText(text, x + uw + sp, cy);
 
-		} else if (row.k === "detail") {
-			/* 扁平椭圆下的合并行：今日 + 本轮 放同一行 */
-			const t = st.turn || {};
-			const todayTxt = "今日 ¥" + money(st.balance.todayUsage, 2);
-			const turnTxt = (t.amount === null || t.amount === undefined)
-				? "本轮 --" : ("本轮 ¥" + money(t.amount, 3));
-			const text = todayTxt + "   ·   " + turnTxt;
+		} else if (row.k === "today") {
+			const text = "今日已用 ¥" + money(st.ledger.used, 2);
 			const px = fitFont(text, Math.round(rowH * 0.62), innerW);
 			ctx.fillStyle = C_INK;
 			ctx.font = "bold " + px + "px " + fam;
@@ -351,35 +390,22 @@ function render(context) {
 			ctx.fillText(text, innerX + innerW / 2, cy);
 			ctx.textAlign = "left";
 
-		} else if (row.k === "today") {
-			const text = "今日已用 ¥" + money(st.balance.todayUsage, 2);
-			const px = fitFont(text, Math.round(rowH * 0.62), innerW);
-			ctx.fillStyle = C_INK;
-			ctx.font = "bold " + px + "px " + fam;
-			ctx.fillText(text, innerX, cy);
-
-		} else if (row.k === "turn") {
-			const t = st.turn || {};
-			const left = (t.amount === null || t.amount === undefined)
-				? "本轮 --" : ("本轮 ¥" + money(t.amount, 3));
-			const right = "· " + tokens(t.tokens) + " tok";
-			let px = Math.round(rowH * 0.52);
-			ctx.font = "bold " + px + "px " + fam;
-			while (px > 7 && ctx.measureText(left).width + ctx.measureText(right).width + px * 0.4 > innerW) {
-				px -= 1;
-				ctx.font = "bold " + px + "px " + fam;
-			}
-			ctx.fillStyle = C_INK;
-			ctx.fillText(left, innerX, cy);
-			ctx.textAlign = "right";
+		} else if (row.k === "detail") {
+			/* 赠送 / 充值 —— 官方接口直接提供，不依赖任何外部统计 */
+			const text = (st.granted > 0)
+				? ("赠送 ¥" + money(st.granted, 2) + "   ·   充值 ¥" + money(st.toppedUp, 2))
+				: (st.currency + " · 充值余额 ¥" + money(st.toppedUp, 2));
+			const px = fitFont(text, Math.round(rowH * 0.58), innerW);
 			ctx.fillStyle = C_SUB;
-			ctx.fillText(right, innerX + innerW, cy);
+			ctx.font = "bold " + px + "px " + fam;
+			ctx.textAlign = "center";
+			ctx.fillText(text, innerX + innerW / 2, cy);
 			ctx.textAlign = "left";
 
 		} else if (row.k === "state") {
-			const text = st_data === "error" ? "DSH 未运行" : "连接中…";
+			const text = statusMessage(st);
 			const px = fitFont(text, Math.round(rowH * 0.72), innerW);
-			ctx.fillStyle = st_data === "error" ? C_PEAK : "#d97706";
+			ctx.fillStyle = (st.status === "loading") ? "#d97706" : C_PEAK;
 			ctx.font = "bold " + px + "px " + fam;
 			ctx.textAlign = "center";
 			ctx.fillText(text, innerX + innerW / 2, cy);
@@ -391,7 +417,6 @@ function render(context) {
 	if (whaleReady && whaleImg) {
 		ctx.drawImage(whaleImg, whaleX, whaleY, whaleS, whaleS);
 	} else {
-		/* 图还没到：先占位，onload 会重画 */
 		ctx.beginPath();
 		ctx.arc(whaleX + whaleS / 2, whaleY + whaleS / 2, whaleS * 0.36, 0, Math.PI * 2);
 		ctx.fillStyle = "rgba(125,211,252,0.25)";
@@ -401,19 +426,16 @@ function render(context) {
 	/* ---------- 状态灯：气泡右上内侧，白底 + 同色描边环 ---------- */
 	const dotR = Math.max(3, Math.round(Math.min(w, h) * 0.022));
 	const statusColor = st.status === "ok" ? "#22c55e"
-		: st.status === "error" ? C_PEAK : "#f59e0b";
+		: st.status === "loading" ? "#f59e0b" : C_PEAK;
 
 	/*
 	 * 位置按椭圆参数方程取（(rx·cosθ, ry·sinθ)），再沿该方向向内收，
 	 * 直到圆点与气泡描边之间留出 margin 的净空。
-	 *
-	 * 早先固定在 -45°、0.94 半径处：椭圆一旦压扁，该点就贴到边框上了。
-	 * 现在角度与内收量都由尺寸算出，任何长宽比下都留有余量。
 	 */
-	const dotAngle = -0.50;                          /* 比 -45° 更低，落在右上方而非正上角 */
+	const dotAngle = -0.50;
 	const bx = rx * Math.cos(dotAngle);
 	const by = ry * Math.sin(dotAngle);
-	const edgeDist = Math.sqrt(bx * bx + by * by);   /* 圆心沿该方向到边界的距离 */
+	const edgeDist = Math.sqrt(bx * bx + by * by);
 	const dotMargin = dotR + strokeW + Math.max(3, Math.min(rx, ry) * 0.06);
 	const dotK = Math.max(0.30, 1 - dotMargin / edgeDist);
 	const dotX = cx + bx * dotK;
@@ -442,27 +464,54 @@ function refresh(context) {
 	const st = instances[context];
 	if (!st) return;
 
+	const key = (st.settings.apiKey || "").trim();
+	if (!key) {
+		st.status = "nokey";
+		render(context);
+		return;
+	}
+
 	if (st.status !== "ok") {
 		st.status = "loading";
 		render(context);
 	}
 
-	fetchFromAnyPort(PATH_BALANCE, function (err, balance) {
+	fetchBalance(key, function (err, payload) {
 		if (!instances[context]) return;
-		if (err || !balance || !balance.ok) {
-			st.status = "error";
+
+		if (err) {
+			st.status = err.kind === "http" ? "http" : err.kind;
+			st.httpCode = err.code || "";
 			render(context);
 			return;
 		}
-		st.balance = balance;
 
-		fetchFromAnyPort(PATH_TURN, function (err2, turn) {
-			if (!instances[context]) return;
-			st.turn = err2 ? null : turn;
-			st.status = "ok";
-			st.updatedAt = Date.now();
+		const info = pickBalanceInfo(payload);
+		if (!info) {
+			st.status = "parse";
 			render(context);
-		});
+			return;
+		}
+
+		st.status = "ok";
+		st.balance = Number(info.total_balance);
+		st.granted = Number(info.granted_balance);
+		st.toppedUp = Number(info.topped_up_balance);
+		st.currency = info.currency || "CNY";
+		st.isPeak = isPeakTime(Math.floor(Date.now() / 1000));
+		st.updatedAt = Date.now();
+
+		/* 本地记账：只有真正变化时才写回设置，避免每次轮询都落盘 */
+		if (isFinite(st.balance)) {
+			const next = updateLedger(st.ledger, st.balance);
+			st.ledger = { day: next.day, used: next.used, last: next.last };
+			if (next.changed) {
+				st.settings.ledger = st.ledger;
+				$SD.setSettings(context, st.settings);
+			}
+		}
+
+		render(context);
 	});
 }
 
@@ -470,7 +519,7 @@ function startTimer(context) {
 	const st = instances[context];
 	if (!st) return;
 	if (st.timer) clearInterval(st.timer);
-	const sec = Math.max(5, parseInt(st.settings.refreshSec) || 30);
+	const sec = Math.max(10, parseInt(st.settings.refreshSec) || 60);
 	st.timer = setInterval(function () { refresh(context); }, sec * 1000);
 }
 
@@ -485,7 +534,12 @@ const $AD = {
 				settings: settings,
 				status: "loading",
 				balance: null,
-				turn: null,
+				granted: 0,
+				toppedUp: 0,
+				currency: "CNY",
+				isPeak: false,
+				httpCode: "",
+				ledger: normalizeLedger(settings.ledger),
 				timer: null
 			};
 			$SD.setSettings(context, settings);
@@ -503,9 +557,14 @@ const $AD = {
 		didReceiveSettings(data) {
 			const st = instances[data.context];
 			if (!st) return;
-			st.settings = Object.assign({}, DEFAULT_SETTINGS, data.payload.settings || {});
+			const incoming = data.payload.settings || {};
+			st.settings = Object.assign({}, DEFAULT_SETTINGS, incoming);
+			/* 属性面板不该覆盖记账数据：面板若没带 ledger 就沿用内存里的 */
+			st.ledger = normalizeLedger(incoming.ledger || st.ledger);
+			st.settings.ledger = st.ledger;
 			render(data.context);
 			startTimer(data.context);
+			refresh(data.context);
 		},
 
 		keyUp(data) {

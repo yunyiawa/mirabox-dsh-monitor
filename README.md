@@ -1,6 +1,8 @@
 # DSH Monitor · 鲸鱼娘余额气泡
 
-> 一个 [MiraBox Craft](https://mirabox.net/) 副屏控件（`mPanelPlugin`）：把 DeepSeek 的**余额 / 今日消耗 / 本轮花费**画成一只鲸鱼娘，配上横向椭圆气泡，常驻在你的机箱小屏上。
+> 一个 [MiraBox Craft](https://mirabox.net/) 副屏控件（`mPanelPlugin`）：把 DeepSeek 的**余额 / 今日已用 / 赠送充值**画成一只鲸鱼娘，配上横向椭圆气泡，常驻在你的机箱小屏上。
+>
+> **直接调用 DeepSeek 官方余额接口，不需要 DSH。**
 
 ![预览](preview/preview-480x240-valley.png)
 
@@ -10,13 +12,13 @@
 
 - 🐋 **鲸鱼娘 + 椭圆气泡** —— 气泡为横向扁椭圆，蓝色描边（`#203170`），尖角指向鲸鱼
 - 💰 **实时余额**：大字号主视觉，一眼看清
-- 📊 **今日已用 / 本轮花费**：含本轮 token 数
-- 🕐 **峰谷标识**：文案默认玩「梁文峰 / 梁文谷」的梗，可在设置里切换为「高峰时段 / 空闲时段」
-- 🔌 **端口自动探测**：DSH 监听端口不固定（3080 / 3081 / …），控件会按候选列表自动找到并缓存
-- 🔑 **不存 API Key**：数据取自本机 DSH 的本地接口，插件里没有任何密钥
+- 📊 **今日已用**：本地记账（累加余额下降量），随配置持久化
+- 🎁 **赠送 / 充值余额**：官方接口直接提供，不依赖任何外部统计
+- 🕐 **峰谷标识**：文案默认玩「梁文峰 / 梁文谷」的梗，可切换为「高峰时段 / 空闲时段」
+- 🔌 **零中间层**：只依赖 `api.deepseek.com`，不经过 DSH 或任何本地服务
 - 📐 **尺寸自适应**：宽高比变化时自动在「左右排布」和「上下排布」之间切换；椭圆按目标比例取最大内接
-- 🧩 **拥挤时自动精简**：椭圆被压扁、行高不足时，两条明细自动并为一行，优先保证字号可读
-- 🟢 **状态可见**：DSH 未运行时明确显示「DSH 未运行」，而不是一块不知道坏没坏的屏
+- 🧩 **错误状态明确**：未配置 Key / Key 无效 / 网络不可用 / 返回异常 各有独立提示，不会静默失败
+- 🟢 **状态灯**：绿=正常、黄=查询中、红=失败
 
 ## 预览
 
@@ -28,42 +30,13 @@
 |---|---|---|
 | ![320x160](preview/preview-320x160-valley.png) | ![480x160](preview/preview-480x160.png) | ![200x200](preview/preview-200x200.png) |
 
-| 小尺寸 160×120 | DSH 未运行 |
-|---|---|
-| ![160x120](preview/preview-160x120.png) | ![offline](preview/preview-offline.png) |
+| 未配置 API Key | API Key 无效 | 网络不可用 |
+|---|---|---|
+| ![nokey](preview/preview-nokey.png) | ![auth](preview/preview-auth.png) | ![offline](preview/preview-offline.png) |
 
 > 以上预览图全部由 `node tools/pixeltest.js` 用插件**真实绘制代码**离线渲染生成，不是手工画的示意图。
 
-## 前置依赖
-
-这个控件**本身不直接调用 DeepSeek API**，而是复用本机 DSH 已经算好的结果。因此需要：
-
-| 依赖 | 说明 |
-|---|---|
-| **MiraBox Craft** | 副屏软件本体（Windows）。开发环境为 `2.x`，D5 竖屏 |
-| **DSH（DeepSeek Harness）** | Web 服务需处于运行状态 |
-| **[dsh-whale-widget](https://github.com/MeteorNOX/DeepSeek-Balance-Whale-Widget)** | 提供 `/dsh-whale/*` 本地接口，本控件的唯一数据源 |
-
-安装 `dsh-whale-widget`：
-
-```powershell
-dsh plugin --profile web add github:MeteorNOX/DeepSeek-Balance-Whale-Widget
-```
-
-**用到的接口**：
-
-| 接口 | 用途 |
-|---|---|
-| `http://127.0.0.1:<port>/dsh-whale/balance.json` | 余额、今日消耗、峰谷状态 |
-| `http://127.0.0.1:<port>/dsh-whale/last-turn.json` | 上一轮花费与 token 数 |
-
-端口按 `3080 → 3081 → 3082 → 3090` 顺序探测，第一个响应的会被记住并优先复用。
-
-> 💡 为什么这样做：插件目录里的 JS 是**明文**，不该存放 DeepSeek API Key；而且峰谷计价与记账逻辑复用 DSH 侧已算好的结果，不会出现两套算法对不上的情况。
-
 ## 安装
-
-### 方式一：手动复制
 
 1. 下载本仓库（或 [Release](../../releases) 里的 zip）
 2. 把 `com.hamiy.dshmonitor.mPanelPlugin` 整个文件夹放进：
@@ -80,6 +53,7 @@ dsh plugin --profile web add github:MeteorNOX/DeepSeek-Balance-Whale-Widget
 
 3. **完全退出** MiraBox Craft（注意是托盘右键退出，不是关窗口）
 4. 重新打开，在组件列表找到分类 **DSH** → 控件 **DSH Monitor**，拖到画布上
+5. **右键控件 → 设置 → 填入 DeepSeek API Key → 点「测试连接」确认**
 
 > ⚠️ 修改插件代码后**必须重启** MiraBox Craft。QtWebEngine 会缓存插件页面，仅替换文件不会生效。
 
@@ -89,12 +63,27 @@ dsh plugin --profile web add github:MeteorNOX/DeepSeek-Balance-Whale-Widget
 
 | 选项 | 默认 | 说明 |
 |---|---|---|
+| **API Key** | 空 | DeepSeek API Key，在 [platform.deepseek.com](https://platform.deepseek.com/api_keys) 创建 |
 | 峰谷文案 | 梁文峰 / 梁文谷 | 可切换为「高峰时段 / 空闲时段」或「!?峰峰?! / !?谷谷?!」 |
-| 刷新间隔 | 30 秒 | 最小 5 秒 |
-| 今日消耗 | 开 | 是否显示今日已用 |
-| 本轮花费 | 开 | 是否显示本轮花费与 token |
+| 刷新间隔 | 60 秒 | 最小 10 秒 |
+| 今日已用 | 开 | 是否显示今日已用（本地记账） |
+| 赠送/充值 | 开 | 是否显示赠送与充值余额 |
 
-**交互**：点一下控件可立即刷新，不必等刷新周期。
+面板里的**「测试连接」**会直接打一次接口并告诉你结果，不依赖控件状态，方便排查。
+
+**交互**：点一下控件可立即刷新。
+
+### 关于 API Key 的安全性
+
+Key 由属性面板填写后，**与其它控件设置一起明文保存在 MiraBox Craft 的主题配置里**（`%APPDATA%\HotSpot\MiraBox Craft\profiles\*.mPanelTheme\manifest.json`）。这是 MiraBox Craft 的配置机制所决定的，插件无法加密存储。
+
+因此：
+
+- 请在 DeepSeek 平台为这个小控件**单独创建一个 Key**，便于随时吊销
+- **不要**在这台机器以外的地方复用同一个 Key
+- 如果这台机器与他人共用，请自行评估
+
+> 早期版本（v2.x）之所以不存 Key，是因为它复用 DSH 侧的本地接口。v3 为了摆脱 DSH 依赖才改为直连，这个取舍需要你知情。
 
 ## 工作原理
 
@@ -129,11 +118,38 @@ connectElgatoStreamDeckSocket(port, pluginUUID, registerEvent, info)
 
 所以「显示任意内容」的本质就是：**定时算出想显示的画面 → 画成 PNG → `setImage` 推给屏幕**。
 
-几个实现细节：
+### 数据来源
+
+每 `刷新间隔` 秒请求一次：
+
+```
+GET https://api.deepseek.com/user/balance
+Authorization: Bearer <API Key>
+```
+
+返回：
+
+```json
+{
+  "is_available": true,
+  "balance_infos": [
+    { "currency": "CNY", "total_balance": "11.12",
+      "granted_balance": "0.00", "topped_up_balance": "11.12" }
+  ]
+}
+```
+
+官方接口只给**当前余额**、没有用量历史，所以另外两项是本地推算的：
+
+- **今日已用**：累加余额的下降量。中途充值不会把已用量冲掉（只累加下降）。跨天按**北京时间**归零。
+- **峰谷状态**：按官方时段本地判定 —— 工作日 `9:00–12:00`、`14:00–18:00` 为高峰，其余为空闲；**周末全天按谷价**（2026-08-23 起）。
+
+### 几个实现细节
 
 - **椭圆里的排版**：椭圆的可用宽度随高度变化（中间最宽、上下收窄），因此逐行按该行高度反算宽度（`halfW = rx·√(1−(dy/ry)²)`），而不是套用外接矩形——否则四角的字会被椭圆切掉。
 - **尖角与椭圆合成单条路径**：若先画椭圆再补三角形，接缝处会留下一条横穿尖角根部的描边线。这里让 `ctx.ellipse()` 绕整圈时留出缺口，直接 `lineTo` 到尖角顶点再闭合，做到一次填充、一次描边。
-- **鲸鱼图本地打包**：立绘随插件分发，所以 **DSH 没运行时鲸鱼照样显示**，只是气泡里写「DSH 未运行」。
+- **状态灯定位**：按椭圆参数方程 `(rx·cosθ, ry·sinθ)` 取点后沿该方向内收，保证与描边之间始终留有净空 —— 早期版本固定在 `-45°、0.94 半径` 处，椭圆压扁后净空会变成负数（灯压在边框上）。
+- **鲸鱼图本地打包**：立绘随插件分发，所以**断网时鲸鱼照样显示**，只是气泡里写错误原因。
 
 ## 本地开发
 
@@ -155,17 +171,22 @@ $env:NAPI_CANVAS="C:\Program Files\MiraBoxCraft\defaultPlugins\com.hotspot.strea
 **跑测试**：
 
 ```powershell
-node tools/smoketest.js   # 尺寸×状态矩阵冒烟，断言不抛异常
-node tools/pixeltest.js   # 真实渲染 + 像素自检，并重新生成 preview/
+node tools/smoketest.js   # 尺寸×状态矩阵冒烟（100 项），断言不抛异常
+node tools/pixeltest.js   # 真实渲染 + 像素/文案自检，并重新生成 preview/
 ```
 
-`tools/harness.js` 把插件加载进 VM 沙箱，用桩件补齐 `document` / `Image` / `XMLHttpRequest` / `WebSocket`，并拦截三个调用以便断言：
+`tools/harness.js` 把插件加载进 VM 沙箱，用桩件补齐 `document` / `Image` / `XMLHttpRequest` / `WebSocket`，并拦截三处调用以便断言：
 
 | 拦截 | 用途 |
 |---|---|
 | `ctx.ellipse()` | 读插件算出的椭圆半径，验证长宽比 |
-| `ctx.fillText()` | 读真正画出去的字符串，验证排版取舍 |
+| `ctx.fillText()` | 读真正画出去的字符串，验证文案分支 |
 | `WebSocket.send()` | 截获 `setImage` 的 dataURL，拿到最终画面做像素统计 |
+
+自检里有两处是踩过坑才加上的，值得说明：
+
+- **状态灯必须用连通域聚类定位**，不能对同色像素直接求质心 —— 谷时文案「梁文谷」的绿色与状态灯同色系，抗锯齿边缘会把质心拉偏 10px 以上。
+- **还要限制连通域尺寸** —— 失败态的红色文字与红灯同色，不限制尺寸会挑到字形，测出与真实位置无关的净空。
 
 ## 素材来源与许可
 
@@ -179,10 +200,11 @@ node tools/pixeltest.js   # 真实渲染 + 像素自检，并重新生成 previe
 |---|---|---|
 | `static/whale.png`（鲸鱼娘立绘） | [MeteorNOX/DeepSeek-Balance-Whale-Widget](https://github.com/MeteorNOX/DeepSeek-Balance-Whale-Widget) 的 `assets/DSniang1.png` | MIT，© 2026 MeteorNOX |
 | 峰谷文案「梁文峰 / 梁文谷」、配色 `#e0433f` / `#2fa24c` / `#203170` | 同上项目的文案与配色 | MIT，© 2026 MeteorNOX |
+| 峰谷时段判定规则 | 同上项目（与 DeepSeek 官方定价页一致） | MIT，© 2026 MeteorNOX |
 | 插件协议与 SDK 约定 | [StreamDock Plugin SDK](https://sdk.key123.vip/) | 归各自权利人 |
 | `static/icon.png` | 本项目自制 | 同本项目 |
 
-**鲸鱼娘立绘不是本项目原创**，是从上述 MIT 项目复制而来，版权归原作者 MeteorNOX 所有。完整许可证原文见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
+**鲸鱼娘立绘不是本项目原创**，是从上述 MIT 项目复制而来（文件未作修改，SHA256 一致），版权归原作者 MeteorNOX 所有。完整许可证原文见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
 
 如果你想换成自己的立绘：替换 `static/whale.png` 即可（建议方形、带透明通道，绘制时会等比缩放填充鲸鱼区域）。
 
@@ -192,29 +214,34 @@ node tools/pixeltest.js   # 真实渲染 + 像素自检，并重新生成 previe
 
 ## 已知限制
 
-- **仅在有 DSH + dsh-whale-widget 的机器上有数据**。DSH 未运行时控件会显示「DSH 未运行」而非空白。
-- **依赖 `dsh-whale-widget` 的接口路径**（`/dsh-whale/balance.json`、`/dsh-whale/last-turn.json`）。若上游改了路径，本控件会失效，需要同步修改 `plugin/index.js` 里的 `PATH_BALANCE` / `PATH_TURN`。
+- **「今日已用」只统计控件运行期间的消耗。** 控件没在跑的时候发生的用量统计不到 —— 官方接口不提供用量历史，这是原理上的限制。
+- **没有「本轮对话花费」。** 那需要 DSH 的会话事件，v3 已移除该依赖，因此这一项不再提供。
+- **跨源请求**：插件页是 `file://`，请求 `https://api.deepseek.com` 属于跨源。MiraBox Craft 的插件页可跨域取第三方 API（自带插件即如此），实测可用；若某天被拦，错误会以「网络不可用」显式暴露。
 - **仅在 Windows + D5 竖屏上实测**。插件代码本身与平台无关，但安装路径是 Windows 的。
-- 跨源请求依赖 QtWebEngine 允许 `file://` 页面访问 `http://127.0.0.1`。这一点在本机验证可用（MiraBox Craft 自带插件也这么做）。
 
 ## 更新日志
 
+### 3.0.0
+- **改为直连 DeepSeek 官方余额接口，不再依赖 DSH。** 起因是 `dsh-whale-widget` 0.3.0 给所有本地路由套上了 DSH 的信任围栏（`conn.requestRejection`），未带浏览器会话的请求一律 401，控件因此失效
+- 新增 API Key 配置项与「测试连接」按钮
+- 新增错误状态区分：未配置 Key / Key 无效 / 网络不可用 / 超时 / HTTP 错误 / 返回异常
+- 「今日已用」改为本地记账（累加余额下降量，跨天按北京时间归零）
+- 「本轮花费」移除（需要 DSH 会话事件）；改为显示**赠送 / 充值余额**（官方接口直接提供）
+- 冒烟测试从 49 项扩到 100 项，覆盖全部失败态
+
 ### 2.4.1
 - **修复：状态灯压在气泡描边上。** 旧定位固定在 -45°、0.94 半径处，椭圆压扁后净空为负（实测 480×240 下 +0.5px、240×120 下 −0.2px，即与描边重叠）
-- 状态灯改为按椭圆参数方程定位并沿该方向自动内收，任何尺寸/长宽比下都保留约 3–5.5px 净空
-- 新增自检：从渲染结果中定位状态灯，测量其到描边的实际净空并断言不得压线
+- 状态灯改为按椭圆参数方程定位并沿该方向自动内收，任何尺寸下都保留约 3–5.5px 净空
 
 ### 2.4.0
 - 默认控件尺寸放大一倍：320×160 → 480×240
 
 ### 2.3.0
 - 椭圆长宽比 1.6 → 2.0，明显更扁更宽
-- 鲸鱼宽度占比调整，把省下的宽度让给气泡
 - 新增：椭圆压扁导致行高不足时，两条明细自动合并为一行
 
 ### 2.2.0
 - 椭圆引入目标长宽比，不再简单铺满外接框（此前气泡接近正圆）
-- 新增自检：拦截 `ctx.ellipse()` 验证椭圆真实形状
 
 ### 2.1.0
 - 气泡改为椭圆 + 蓝色描边 `#203170`
@@ -226,4 +253,4 @@ node tools/pixeltest.js   # 真实渲染 + 像素自检，并重新生成 previe
 - 鲸鱼立绘随插件本地打包
 
 ### 1.0.0
-- 首个可用版本：余额 / 今日消耗 / 本轮花费，端口自动探测
+- 首个可用版本

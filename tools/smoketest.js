@@ -3,8 +3,12 @@
 /*
  * 冒烟测试：遍历「尺寸 × 状态」组合跑一遍绘制逻辑，只断言不抛异常。
  *
- * 目的是在装进 MiraBox Craft 之前先抓运行时错误（比如变量名写错、
- * 某条分支在某些尺寸下除零、椭圆半径越界之类）。
+ * 目的是在装进 MiraBox Craft 之前先抓运行时错误（变量名写错、
+ * 某条分支在特定尺寸下除零、椭圆半径越界之类）。
+ *
+ * v3 起数据直接来自 DeepSeek 官方接口，因此这里把各种失败态
+ * （未配置 Key / Key 无效 / 网络不可用 / 超时 / HTTP 错误 / 返回异常）
+ * 也一并覆盖——它们各自走不同的文案分支，最容易漏测。
  *
  * 用法: node tools/smoketest.js
  */
@@ -15,23 +19,40 @@ const h = loadPlugin();
 const T = h.api;
 const UUID = T.ACTION_UUID;
 
-const BAL = {
-	ok: true, totalBalance: 5.81, currency: 'CNY',
-	updatedAt: '2026-09-12T17:49:19Z', isPeak: false, todayUsage: 1.24, usageMode: 'ledger'
-};
-const BAL_PEAK = Object.assign({}, BAL, { isPeak: true, totalBalance: 123.45, todayUsage: 98.76 });
-const TURN = { ok: true, seq: 7, turn: 2, amount: 0.5253038999999998, tokens: 3290229 };
+/** 造一个正常的余额状态 */
+function okState(over) {
+	return Object.assign({
+		status: 'ok',
+		balance: 11.12,
+		granted: 0,
+		toppedUp: 11.12,
+		currency: 'CNY',
+		isPeak: false,
+		httpCode: '',
+		ledger: { day: '2026-09-16', used: 1.77, last: 11.12 },
+		timer: null
+	}, over || {});
+}
+
+/** 造一个失败状态 */
+function errState(status, code) {
+	return {
+		status: status,
+		balance: null, granted: 0, toppedUp: 0, currency: 'CNY',
+		isPeak: false, httpCode: code || '',
+		ledger: { day: '', used: 0, last: null },
+		timer: null
+	};
+}
 
 function settings(over) {
 	return Object.assign({}, T.DEFAULT_SETTINGS, over || {});
 }
 
-function run(label, w, hh, status, balance, turn, over) {
+function run(label, w, hh, state, over) {
 	const ctx = 'c-' + label;
-	T.instances[ctx] = {
-		settings: settings(Object.assign({ ActionGeometry: { width: w, height: hh } }, over || {})),
-		status, balance, turn, timer: null
-	};
+	const s = settings(Object.assign({ ActionGeometry: { width: w, height: hh } }, over || {}));
+	T.instances[ctx] = Object.assign({ settings: s }, state);
 	try {
 		T.render(ctx);
 	} catch (e) {
@@ -53,7 +74,7 @@ function run(label, w, hh, status, balance, turn, over) {
 	} catch (e) {
 		console.log('  willAppear FAIL: ' + e.message);
 	}
-	await h.wait(600);
+	await h.wait(700);
 
 	let pass = 0, total = 0;
 
@@ -63,35 +84,42 @@ function run(label, w, hh, status, balance, turn, over) {
 		[160, 240], [128, 128], [480, 160], [180, 300], [600, 200]
 	];
 	const states = [
-		['正常-谷时', 'ok', BAL, TURN],
-		['正常-峰时', 'ok', BAL_PEAK, TURN],
-		['DSH未运行', 'error', null, null],
-		['连接中', 'loading', null, null]
+		['正常-谷时', okState()],
+		['正常-峰时', okState({ isPeak: true, balance: 123.45, granted: 20, toppedUp: 103.45 })],
+		['加载中', errState('loading')],
+		['未配置Key', errState('nokey')],
+		['Key无效', errState('auth')],
+		['网络不可用', errState('net')],
+		['请求超时', errState('timeout')],
+		['HTTP错误', errState('http', 500)],
+		['返回异常', errState('parse')]
 	];
 
 	for (const [w, hh] of sizes) {
-		for (const [sl, status, bal, turn] of states) {
+		for (const [sl, state] of states) {
 			total++;
-			if (run(w + 'x' + hh + ' ' + sl, w, hh, status, bal, turn)) pass++;
+			if (run(w + 'x' + hh + ' ' + sl, w, hh, state)) pass++;
 		}
 	}
 
 	console.log('');
 	console.log('=== 极端情况 ===');
+	const zero = okState({ balance: 0, granted: 0, toppedUp: 0, ledger: { day: 'x', used: 0, last: 0 } });
 	const edge = [
-		['超小 64x64', 64, 64, 'ok', BAL, TURN, {}],
-		['超扁 600x60', 600, 60, 'ok', BAL, TURN, {}],
-		['超高 60x600', 60, 600, 'ok', BAL, TURN, {}],
-		['巨大金额', 480, 240, 'ok', Object.assign({}, BAL, { totalBalance: 999999.99, todayUsage: 88888.88 }), TURN, {}],
-		['没有本轮数据', 480, 240, 'ok', BAL, null, {}],
-		['关闭全部明细', 480, 240, 'ok', BAL, TURN, { showToday: false, showTurn: false }],
-		['只开今日', 480, 240, 'ok', BAL, TURN, { showTurn: false }],
-		['只开本轮', 480, 240, 'ok', BAL, TURN, { showToday: false }],
-		['零余额', 480, 240, 'ok', Object.assign({}, BAL, { totalBalance: 0, todayUsage: 0 }), TURN, {}]
+		['超小 64x64', 64, 64, okState(), {}],
+		['超扁 600x60', 600, 60, okState(), {}],
+		['超高 60x600', 60, 600, okState(), {}],
+		['巨大金额', 480, 240, okState({ balance: 999999.99, toppedUp: 999999.99, ledger: { day: 'x', used: 88888.88, last: 999999.99 } }), {}],
+		['余额为零', 480, 240, zero, {}],
+		['赠送大于充值', 480, 240, okState({ granted: 50, toppedUp: 10, balance: 60 }), {}],
+		['关闭今日已用', 480, 240, okState(), { showToday: false }],
+		['关闭赠送充值', 480, 240, okState(), { showDetail: false }],
+		['全部明细关闭', 480, 240, okState(), { showToday: false, showDetail: false }],
+		['记账未初始化', 480, 240, okState({ ledger: { day: '', used: 0, last: null } }), {}]
 	];
-	for (const [label, w, hh, status, bal, turn, over] of edge) {
+	for (const [label, w, hh, state, over] of edge) {
 		total++;
-		if (run(label, w, hh, status, bal, turn, over)) pass++;
+		if (run(label, w, hh, state, over)) pass++;
 	}
 
 	console.log('');

@@ -1,6 +1,8 @@
 # DSH Monitor · Whale-Girl Balance Bubble
 
-> A [MiraBox Craft](https://mirabox.net/) secondary-screen widget (`mPanelPlugin`) that draws your DeepSeek **balance / today's spend / last-turn cost** as a whale-girl with a wide elliptical speech bubble.
+> A [MiraBox Craft](https://mirabox.net/) secondary-screen widget (`mPanelPlugin`) that draws your DeepSeek **balance / today's usage / granted & topped-up balance** as a whale-girl with a wide elliptical speech bubble.
+>
+> **Calls the official DeepSeek balance API directly — no DSH required.**
 
 ![Preview](preview/preview-480x240-valley.png)
 
@@ -12,13 +14,14 @@
 
 - 🐋 **Whale-girl + elliptical bubble** — wide flat ellipse, blue outline (`#203170`), tail pointing at the whale
 - 💰 **Live balance** as the primary visual
-- 📊 **Today's usage / last-turn cost**, including token count
+- 📊 **Today's usage** — tracked locally from balance decreases
+- 🎁 **Granted / topped-up balance** — provided directly by the official API
 - 🕐 **Peak/off-peak badge** — defaults to a Chinese pun («梁文峰 / 梁文谷», after DeepSeek's founder); switchable to plain wording
-- 🔌 **Automatic port detection** — DSH's listening port is not fixed (3080 / 3081 / …); the widget probes a candidate list and caches the one that answers
-- 🔑 **No API key stored** — data comes from DSH's local HTTP endpoint; the plugin holds no secrets
+- 🔌 **Zero middleware** — talks only to `api.deepseek.com`, with no DSH or local service in between
 - 📐 **Size-adaptive** — switches between side-by-side and stacked layouts based on aspect ratio; the ellipse takes the largest inscribed shape at a fixed target ratio
-- 🧩 **Auto-simplifies when cramped** — if the ellipse is squashed and rows would be too short, the two detail lines merge into one to keep text legible
-- 🟢 **Explicit states** — shows "DSH 未运行" (DSH not running) instead of a blank card
+- 🧩 **Explicit error states** — missing key / invalid key / network failure / bad response each get their own message; nothing fails silently
+- 🟢 **Status dot** — green = ok, amber = querying, red = failed
+
 
 ## Preview
 
@@ -30,38 +33,33 @@
 |---|---|---|
 | ![320x160](preview/preview-320x160-valley.png) | ![480x160](preview/preview-480x160.png) | ![200x200](preview/preview-200x200.png) |
 
-| Small 160×120 | DSH not running |
-|---|---|
-| ![160x120](preview/preview-160x120.png) | ![offline](preview/preview-offline.png) |
+| Small 160×120 | Missing API key | Invalid API key | Network unavailable |
+|---|---|---|---|
+| ![160x120](preview/preview-160x120.png) | ![nokey](preview/preview-nokey.png) | ![auth](preview/preview-auth.png) | ![offline](preview/preview-offline.png) |
 
 > All previews above are rendered offline by `node tools/pixeltest.js` using the plugin's **real drawing code** — they are not hand-made mockups.
 
 ## Requirements
 
-This widget does **not** call the DeepSeek API directly. It reuses results already computed by DSH on the same machine. You need:
-
 | Requirement | Notes |
 |---|---|
 | **MiraBox Craft** | The secondary-screen software (Windows). Developed against 2.x, D5 in vertical orientation |
-| **DSH (DeepSeek Harness)** | Its web server must be running |
-| **[dsh-whale-widget](https://github.com/MeteorNOX/DeepSeek-Balance-Whale-Widget)** | Provides the `/dsh-whale/*` local endpoints — the widget's only data source |
+| **A DeepSeek API key** | Created at [platform.deepseek.com](https://platform.deepseek.com/api_keys) |
 
-Install the data provider:
+That's it — no DSH, no local service, no intermediate plugin.
 
-```powershell
-dsh plugin --profile web add github:MeteorNOX/DeepSeek-Balance-Whale-Widget
-```
+### ⚠️ About API key storage
 
-**Endpoints used:**
+The key you enter in the settings panel is **stored in plaintext** alongside the other widget settings, inside MiraBox Craft's theme config (`%APPDATA%\HotSpot\MiraBox Craft\profiles\*.mPanelTheme\manifest.json`). That is how MiraBox Craft persists plugin settings; the plugin cannot encrypt it.
 
-| Endpoint | Purpose |
-|---|---|
-| `http://127.0.0.1:<port>/dsh-whale/balance.json` | Balance, today's usage, peak/off-peak flag |
-| `http://127.0.0.1:<port>/dsh-whale/last-turn.json` | Last turn's cost and token count |
+Therefore:
 
-Ports are probed in the order `3080 → 3081 → 3082 → 3090`; the first to respond is cached and preferred.
+- Create a **dedicated key** for this widget so you can revoke it independently
+- **Do not** reuse that key anywhere outside this machine
+- Judge for yourself if the machine is shared
 
-> 💡 Rationale: plugin JS ships as **plain text**, so embedding a DeepSeek API key would be unsafe. Reusing DSH's computed values also avoids two divergent implementations of peak/off-peak pricing.
+> Versions 2.x stored no key because they reused DSH's local endpoint. v3 trades that away to drop the DSH dependency — you should know the tradeoff.
+
 
 ## Installation
 
@@ -80,6 +78,7 @@ Ports are probed in the order `3080 → 3081 → 3082 → 3090`; the first to re
 
 3. **Fully quit** MiraBox Craft (right-click the tray icon → Exit — closing the window is not enough)
 4. Reopen it, find category **DSH** → widget **DSH Monitor**, and drag it onto your canvas
+5. **Right-click the widget → Settings → paste your DeepSeek API key → click "Test connection"**
 
 > ⚠️ After editing plugin code you **must restart** MiraBox Craft. QtWebEngine caches the plugin page, so replacing files alone has no effect.
 
@@ -89,12 +88,16 @@ Right-click the widget on the canvas → Settings:
 
 | Option | Default | Notes |
 |---|---|---|
+| **API key** | empty | DeepSeek API key, created at [platform.deepseek.com](https://platform.deepseek.com/api_keys) |
 | Peak wording | 梁文峰 / 梁文谷 | Switchable to 高峰时段 / 空闲时段 or !?峰峰?! / !?谷谷?! |
-| Refresh interval | 30 s | Minimum 5 s |
+| Refresh interval | 60 s | Minimum 10 s |
 | Today's usage | on | Show/hide |
-| Last-turn cost | on | Show/hide cost and token count |
+| Granted / topped-up | on | Show/hide |
+
+The **"Test connection"** button in the panel calls the API directly and reports the result, independent of widget state — handy for troubleshooting.
 
 **Interaction:** click the widget to refresh immediately.
+
 
 ## How it works
 
@@ -129,11 +132,38 @@ The plugin connects to `ws://127.0.0.1:<port>`, registers, and then exchanges ev
 
 So "displaying anything" reduces to: **compute the frame periodically → render to a PNG → push it with `setImage`**.
 
-Implementation notes:
+### Data source
+
+Every *refresh interval* seconds the plugin requests:
+
+```
+GET https://api.deepseek.com/user/balance
+Authorization: Bearer <API key>
+```
+
+which returns:
+
+```json
+{
+  "is_available": true,
+  "balance_infos": [
+    { "currency": "CNY", "total_balance": "11.12",
+      "granted_balance": "0.00", "topped_up_balance": "11.12" }
+  ]
+}
+```
+
+The official endpoint returns only the **current balance** — no usage history — so two values are derived locally:
+
+- **Today's usage**: the sum of balance *decreases*. Top-ups do not corrupt it (only decreases are accumulated). It resets at midnight **Beijing time**.
+- **Peak / off-peak**: determined locally from the official schedule — weekdays `09:00–12:00` and `14:00–18:00` are peak, everything else is off-peak; **weekends are off-peak all day** (since 2026-08-23).
+
+### Implementation notes
 
 - **Text inside an ellipse**: available width varies with height (widest in the middle). Each row's width is computed from its vertical position (`halfW = rx·√(1−(dy/ry)²)`) rather than assumed from the bounding box — otherwise corner text gets clipped by the ellipse.
 - **Tail merged into one path**: drawing the ellipse and then a separate triangle would leave a stroke line across the tail's base. Instead `ctx.ellipse()` sweeps around leaving a gap, then `lineTo` the tail tip and closes — one fill, one stroke, seamless outline.
-- **Whale art ships with the plugin**, so the character still renders when DSH is down; only the bubble text changes to "DSH 未运行".
+- **Status dot placement**: derived from the ellipse's parametric equation `(rx·cosθ, ry·sinθ)` and then pulled inward along that direction, guaranteeing clearance from the outline. An earlier version pinned it at `-45° / 0.94 of the radius`, which produced *negative* clearance once the ellipse was flattened — the dot sat on top of the border.
+- **Whale art ships with the plugin**, so the character still renders offline; only the bubble text changes to the error reason.
 
 ## Development
 
@@ -181,6 +211,7 @@ Released under the **MIT License** — see [LICENSE](LICENSE).
 |---|---|---|
 | `static/whale.png` (whale-girl art) | `assets/DSniang1.png` from [MeteorNOX/DeepSeek-Balance-Whale-Widget](https://github.com/MeteorNOX/DeepSeek-Balance-Whale-Widget) | MIT, © 2026 MeteorNOX |
 | Peak wording and colours `#e0433f` / `#2fa24c` / `#203170` | Same project | MIT, © 2026 MeteorNOX |
+| Peak/off-peak schedule rule | Same project (consistent with DeepSeek's official pricing page) | MIT, © 2026 MeteorNOX |
 | Plugin protocol / SDK conventions | [StreamDock Plugin SDK](https://sdk.key123.vip/) | Respective owners |
 | `static/icon.png` | Original to this project | Same as this project |
 
@@ -194,12 +225,20 @@ This is a personal project. It is **not affiliated with, sponsored by, or endors
 
 ## Known limitations
 
-- **Data requires DSH + dsh-whale-widget** on the same machine. Without DSH running, the widget shows "DSH 未运行" rather than going blank.
-- **Depends on the upstream endpoint paths** (`/dsh-whale/balance.json`, `/dsh-whale/last-turn.json`). If upstream changes them, update `PATH_BALANCE` / `PATH_TURN` in `plugin/index.js`.
+- **"Today's usage" only counts while the widget is running.** Consumption that happens while it is not running cannot be seen — the official API exposes no usage history. This is a fundamental limitation, not a bug.
+- **No "last-turn cost".** That requires DSH session events, and v3 removed the DSH dependency, so the row is gone. It was replaced by granted / topped-up balance, which the API provides directly.
+- **Cross-origin**: the plugin page is `file://` and calls `https://api.deepseek.com`. MiraBox Craft's own plugins fetch third-party APIs from `file://` pages, and this works in practice. If it were ever blocked, the failure surfaces explicitly as "网络不可用" (network unavailable) rather than silently.
 - **Only tested on Windows with a D5 in vertical orientation.** The plugin code itself is platform-neutral; the install path is Windows-specific.
-- Cross-origin requests rely on QtWebEngine allowing a `file://` page to reach `http://127.0.0.1`. Verified working locally (MiraBox Craft's own plugins do the same).
 
 ## Changelog
+
+### 3.0.0
+- **Now calls the official DeepSeek balance API directly — the DSH dependency is gone.** This was forced by `dsh-whale-widget` 0.3.0, which wrapped every local route in DSH's trust fence (`conn.requestRejection`), returning 401 to any request without a browser session and thereby breaking the widget
+- Added an API key setting and a "Test connection" button
+- Added distinct error states: missing key / invalid key / network failure / timeout / HTTP error / malformed response
+- "Today's usage" is now tracked locally (accumulating balance decreases, resetting at midnight Beijing time)
+- "Last-turn cost" removed (needs DSH session events); replaced by **granted / topped-up balance** from the official API
+- Smoke tests expanded from 49 to 100 cases, covering every failure state
 
 ### 2.4.1
 - **Fixed: the status dot was overlapping the bubble outline.** Its position was pinned at -45° / 0.94 of the radius, which left negative clearance once the ellipse was flattened (measured +0.5px at 480×240 and −0.2px at 240×120, i.e. actual overlap)
