@@ -190,23 +190,28 @@ node tools/pixeltest.js   # 真实渲染 + 像素/文案自检，并重新生成
 
 ## 素材来源与许可
 
+> ⚠️ **本项目代码是 MIT；但鲸鱼娘立绘不是 MIT 素材**，请勿当作 MIT 内容再分发。
+
 ### 本项目代码
 
 以 **MIT License** 开源，详见 [LICENSE](LICENSE)。
 
-### 第三方素材
+### 第三方内容
 
 | 文件 / 内容 | 来源 | 许可 |
 |---|---|---|
-| `static/whale.png`（鲸鱼娘立绘） | [MeteorNOX/DeepSeek-Balance-Whale-Widget](https://github.com/MeteorNOX/DeepSeek-Balance-Whale-Widget) 的 `assets/DSniang1.png` | MIT，© 2026 MeteorNOX |
-| 峰谷文案「梁文峰 / 梁文谷」、配色 `#e0433f` / `#2fa24c` / `#203170` | 同上项目的文案与配色 | MIT，© 2026 MeteorNOX |
-| 峰谷时段判定规则 | 同上项目（与 DeepSeek 官方定价页一致） | MIT，© 2026 MeteorNOX |
+| `static/whale.png`（鲸鱼娘立绘） | [MeteorNOX/DeepSeek-Balance-Whale-Widget](https://github.com/MeteorNOX/DeepSeek-Balance-Whale-Widget) 的 `assets/DSniang1.png` | **不适用 MIT** —— 见下方说明 |
+| 峰谷文案「梁文峰 / 梁文谷」、配色 `#e0433f` / `#2fa24c` / `#203170`、峰谷时段规则 | 同上项目的**代码**部分 | MIT，© 2026 MeteorNOX |
 | 插件协议与 SDK 约定 | [StreamDock Plugin SDK](https://sdk.key123.vip/) | 归各自权利人 |
 | `static/icon.png` | 本项目自制 | 同本项目 |
 
-**鲸鱼娘立绘不是本项目原创**，是从上述 MIT 项目复制而来（文件未作修改，SHA256 一致），版权归原作者 MeteorNOX 所有。完整许可证原文见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
+**关于鲸鱼娘立绘**：上游仓库自 0.3.5 起明确声明，`assets/` 下的美术素材**不在 MIT 覆盖范围内**，按 as-is 分发、**不授予再许可**，并说明该图由 AI 工具生成、原始出处已不可考。（上游 0.3.0 及更早版本只有一句「本项目基于 MIT License 开源」，没有这条例外说明；本仓库初版据此标注为 MIT，现已按新口径更正。）
 
-如果你想换成自己的立绘：替换 `static/whale.png` 即可（建议方形、带透明通道，绘制时会等比缩放填充鲸鱼区域）。
+因此本仓库**不声称对该图片拥有任何权利**，也**不将其纳入本项目的 MIT 授权**。它仅作为运行本控件所必需的资源随包分发，与上游自己的分发方式一致。若你是该图片的权利人并希望我们移除，请[开一条 issue](../../issues) 说明文件名与依据，我们会立即替换或移除。
+
+想换成自己的立绘：替换 `static/whale.png` 即可（建议方形、带透明通道）。删掉该文件不会导致控件崩溃，只会显示一个占位圆圈。
+
+完整说明与上游 MIT 许可证原文见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
 
 ### 免责声明
 

@@ -201,23 +201,28 @@ See [`tools/README.md`](tools/README.md).
 
 ## Assets & License
 
+> ⚠️ **This project's code is MIT — but the whale-girl artwork is NOT MIT content.** Do not redistribute it as if it were.
+
 ### This project
 
-Released under the **MIT License** — see [LICENSE](LICENSE).
+The code is released under the **MIT License** — see [LICENSE](LICENSE).
 
-### Third-party assets
+### Third-party content
 
 | File / content | Source | License |
 |---|---|---|
-| `static/whale.png` (whale-girl art) | `assets/DSniang1.png` from [MeteorNOX/DeepSeek-Balance-Whale-Widget](https://github.com/MeteorNOX/DeepSeek-Balance-Whale-Widget) | MIT, © 2026 MeteorNOX |
-| Peak wording and colours `#e0433f` / `#2fa24c` / `#203170` | Same project | MIT, © 2026 MeteorNOX |
-| Peak/off-peak schedule rule | Same project (consistent with DeepSeek's official pricing page) | MIT, © 2026 MeteorNOX |
+| `static/whale.png` (whale-girl art) | `assets/DSniang1.png` from [MeteorNOX/DeepSeek-Balance-Whale-Widget](https://github.com/MeteorNOX/DeepSeek-Balance-Whale-Widget) | **Not MIT** — see below |
+| Peak wording, colours `#e0433f` / `#2fa24c` / `#203170`, peak schedule rule | The **code** of the same project | MIT, © 2026 MeteorNOX |
 | Plugin protocol / SDK conventions | [StreamDock Plugin SDK](https://sdk.key123.vip/) | Respective owners |
 | `static/icon.png` | Original to this project | Same as this project |
 
-**The whale-girl artwork is not original to this project.** It was copied from the MIT-licensed project above and remains © MeteorNOX. The full upstream license text is reproduced in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+**About the whale-girl artwork:** since 0.3.5, the upstream project states explicitly that the art under `assets/` is **not covered by its MIT license**, is distributed as-is, and that **no sublicense is granted**; it also notes the image was produced with AI tooling and that its original provenance can no longer be established. (Versions 0.3.0 and earlier said only "this project is open-sourced under the MIT License", with no such carve-out — this repository was labeled MIT on that basis and has now been corrected.)
 
-To use your own artwork, replace `static/whale.png` (square, with alpha recommended; it is scaled to fill the whale area).
+This repository therefore **claims no rights over that image** and **does not include it under this project's MIT grant**. It ships only because the widget needs it to render, mirroring how the upstream itself distributes it. If you hold the rights and want it removed, please [open an issue](../../issues) naming the file and your basis, and we will replace or remove it promptly.
+
+To use your own artwork, replace `static/whale.png` (square, with alpha recommended). Deleting it will not crash the widget — it falls back to a placeholder circle.
+
+Full details and the upstream MIT license text are in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
 ### Disclaimer
 
